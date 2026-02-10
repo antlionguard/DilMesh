@@ -37,16 +37,23 @@
           </div>
           
           <div>
-            <label class="block text-sm text-gray-400 mb-1">Target Language</label>
-            <select v-model="settings.language" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2">
-              <option value="auto">Auto-Detect (TR/EN)</option>
-              <option value="tr">Turkish</option>
-              <option value="en">English</option>
-            </select>
-            <p class="text-xs text-gray-500 mt-2">
-              "Auto-Detect" works best for mixed Turkish/English speech. "Turkish" or "English" locks the model to that language for better stability.
+            <label class="block text-sm text-gray-400 mb-2">Recognition Languages</label>
+            <div class="space-y-2 bg-gray-800 border border-gray-600 rounded px-3 py-2">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" value="tr" v-model="settings.recognitionLanguages" class="w-4 h-4 rounded border-gray-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900" />
+                <span class="text-sm text-white">Turkish (tr-TR)</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" value="en" v-model="settings.recognitionLanguages" class="w-4 h-4 rounded border-gray-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900" />
+                <span class="text-sm text-white">English (en-US)</span>
+              </label>
+            </div>
+            <p class="text-xs text-blue-400 mt-2">
+              Select all languages that might be spoken. Parallel recognizers will run for each selected language to detect the correct one automatically.
+              <br/><span class="text-yellow-500/80">⚠️ Selecting multiple languages increases API usage (1 stream per language).</span>
             </p>
           </div>
+
         </div>
 
         <div v-if="settings.provider === 'LOCAL'" class="p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
@@ -300,6 +307,7 @@ const settings = ref({
   language: 'auto',
   model: 'small',
   audioDeviceId: undefined as string | undefined,
+  recognitionLanguages: ['en'] as string[], // Default to English
   // Advanced Whisper parameters
   step: 1000,
   length: 5000,
@@ -337,7 +345,22 @@ const getAudioDevices = async () => {
 
 onMounted(async () => {
   const s = await window.ipcRenderer.invoke('get-settings', 'transcription')
-  if (s) settings.value = { ...settings.value, ...s }
+  if (s) {
+    settings.value = { ...settings.value, ...s }
+    
+    // Migration: If recognitionLanguages is missing but language exists, migrate it
+    if (!s.recognitionLanguages && s.language) {
+       if (s.language === 'auto') {
+         settings.value.recognitionLanguages = ['tr', 'en']
+       } else {
+         settings.value.recognitionLanguages = [s.language]
+       }
+    }
+    // Ensure at least one language is selected
+    if (!settings.value.recognitionLanguages || settings.value.recognitionLanguages.length === 0) {
+      settings.value.recognitionLanguages = ['en']
+    }
+  }
   await refreshDownloadedModels()
   await getAudioDevices()
   navigator.mediaDevices.ondevicechange = getAudioDevices

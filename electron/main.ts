@@ -51,13 +51,25 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
 
       // If it's a transcript update and translation is needed
       if (channel === 'transcript-update' && language !== 'live' && data.text) {
+        // Skip if source matches target (e.g., tr -> tr-TR)
+        const sourceLang = (data.detectedLanguage || '').split('-')[0]
+        const targetLang = language.split('-')[0]
+
+        if (sourceLang && sourceLang === targetLang) {
+          win.webContents.send(channel, data)
+          continue
+        }
+        console.log(`[Main] Window ${windowId} translation needed. Target: ${language}, Source: ${data.detectedLanguage}`)
+
         // Translate the text if translation service is available
         if (gcpTranslationService && gcpTranslationService.isReady()) {
           try {
             const translatedText = await gcpTranslationService.translate(
               data.text,
-              language
+              language,
+              data.detectedLanguage // Use detected source language for better accuracy
             )
+            console.log(`[Main] Translation result: "${translatedText}"`)
             // Send translated version to this window
             win.webContents.send(channel, { ...data, text: translatedText })
           } catch (error) {
@@ -66,6 +78,7 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
             win.webContents.send(channel, data)
           }
         } else {
+          console.warn(`[Main] Translation service not ready for window ${windowId}`)
           // No translation service, send original
           win.webContents.send(channel, data)
         }
@@ -124,6 +137,15 @@ function createProjectionWindow(id: string, title: string = 'Projection') {
     : `file://${path.join(RENDERER_DIST, 'index.html')}#/projection/${id}?title=${encodeURIComponent(title)}`
 
   win.loadURL(url)
+
+  win.webContents.on('context-menu', () => {
+    Menu.buildFromTemplate([
+      {
+        label: 'Close Window',
+        click: () => win.close()
+      }
+    ]).popup({ window: win })
+  })
 
   win.on('closed', () => {
     projectionWindows.delete(id)

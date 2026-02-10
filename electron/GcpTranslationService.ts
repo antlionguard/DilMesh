@@ -62,7 +62,7 @@ export class GcpTranslationService {
         }
 
         // Check cache first
-        const cacheKey = `${text}:${targetLanguage}`
+        const cacheKey = `${text}:${targetLanguage}:${sourceLanguage || 'auto'}`
         const cached = this.cache[cacheKey]
         if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
             return cached.translation
@@ -70,11 +70,11 @@ export class GcpTranslationService {
 
         try {
             const options: any = {
-                to: targetLanguage,
+                to: targetLanguage.split('-')[0], // Extract language code (e.g. 'en-US' -> 'en')
             }
 
             if (sourceLanguage) {
-                options.from = sourceLanguage
+                options.from = sourceLanguage.split('-')[0] // Extract language code (e.g. 'tr-TR' -> 'tr')
             }
 
             const [translation] = await this.client.translate(text, options)

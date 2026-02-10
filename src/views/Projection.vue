@@ -1,12 +1,10 @@
 <template>
   <div class="fixed inset-0 w-screen h-screen -z-10 transition-colors duration-300 draggable-region" 
-       :style="{ backgroundColor: style.backgroundColor }"
-       @contextmenu.prevent="onContextMenu">
+       :style="{ backgroundColor: style.backgroundColor }">
   </div>
   <div 
     class="fixed transition-all duration-300 draggable-region" 
     :style="positionStyle"
-    @contextmenu.prevent="onContextMenu"
   >
     <div class="text-center transition-all duration-300" :style="textStyle">
       {{ currentText }}
@@ -36,9 +34,7 @@ const style = ref({
 
 const props = defineProps<{ id: string }>()
 
-const onContextMenu = () => {
-   window.ipcRenderer.invoke('show-context-menu', { id: props.id })
-}
+
 
 import { CSSProperties } from 'vue'
 

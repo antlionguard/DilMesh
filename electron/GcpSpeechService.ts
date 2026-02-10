@@ -4,14 +4,28 @@ import { EventEmitter } from 'events'
 
 type IRecognitionConfig = protos.google.cloud.speech.v1.IRecognitionConfig
 
+interface LanguageResult {
+    text: string
+    confidence: number
+    isFinal: boolean
+    language: string
+    timestamp: number
+}
+
+interface LanguageStream {
+    stream: any
+    language: string
+    restartTimeout: NodeJS.Timeout | null
+}
+
 export class GcpSpeechService extends EventEmitter {
     private client: SpeechClient | null = null
-    private recognizeStream: any = null
+    private languageStreams: Map<string, LanguageStream> = new Map()
     private isRunning: boolean = false
 
     // Store config for auto-restart
     private currentGcpKeyJson: string = ''
-    private currentLanguage: string = 'en-US'
+    private currentLanguages: string[] = ['en-US']
     private currentModel: string = 'latest_long'
     private currentEncoding: string = 'LINEAR16'
     private currentInterimResults: boolean = true
@@ -19,7 +33,19 @@ export class GcpSpeechService extends EventEmitter {
     private currentUseEnhanced: boolean = false
     private currentSingleUtterance: boolean = false
     private currentMaxAlternatives: number = 1
-    private restartTimeout: NodeJS.Timeout | null = null
+
+    // Interim result debouncing
+    private interimDebounceTimer: NodeJS.Timeout | null = null
+    private pendingInterimResults: Map<string, LanguageResult> = new Map()
+
+    // Language code mapping
+    private static readonly LANGUAGE_MAP: Record<string, string> = {
+        'auto': 'en-US',
+        'en': 'en-US',
+        'tr': 'tr-TR',
+        'en-US': 'en-US',
+        'tr-TR': 'tr-TR'
+    }
 
     constructor() {
         super()
@@ -43,7 +69,8 @@ export class GcpSpeechService extends EventEmitter {
 
     async start(config: {
         gcpKeyJson?: string,
-        language?: string,
+        language?: string,          // backward compat: single language
+        languages?: string[],       // new: array of languages
         gcpModel?: string,
         gcpEncoding?: string,
         gcpInterimResults?: boolean,
@@ -53,9 +80,8 @@ export class GcpSpeechService extends EventEmitter {
         gcpMaxAlternatives?: number
     }): Promise<boolean> {
         try {
-            // Store config for potential restart
+            // Store config
             this.currentGcpKeyJson = config.gcpKeyJson || ''
-            this.currentLanguage = config.language || 'en-US'
             this.currentModel = config.gcpModel || 'latest_long'
             this.currentEncoding = config.gcpEncoding || 'LINEAR16'
             this.currentInterimResults = config.gcpInterimResults ?? true
@@ -64,7 +90,22 @@ export class GcpSpeechService extends EventEmitter {
             this.currentSingleUtterance = config.gcpSingleUtterance ?? false
             this.currentMaxAlternatives = config.gcpMaxAlternatives ?? 1
 
-            // Initialize client with credentials (only if not already created)
+            // Resolve languages: prefer array, fall back to single language
+            if (config.languages && config.languages.length > 0) {
+                this.currentLanguages = config.languages.map(
+                    lang => GcpSpeechService.LANGUAGE_MAP[lang] || lang
+                )
+            } else {
+                const lang = config.language || 'en-US'
+                this.currentLanguages = [GcpSpeechService.LANGUAGE_MAP[lang] || lang]
+            }
+
+            // Deduplicate
+            this.currentLanguages = [...new Set(this.currentLanguages)]
+
+            console.log(`[GCP Parallel] Starting with languages: ${this.currentLanguages.join(', ')}`)
+
+            // Initialize client (shared across all streams)
             if (!this.client) {
                 if (this.currentGcpKeyJson) {
                     const credentials = JSON.parse(this.currentGcpKeyJson)
@@ -76,33 +117,24 @@ export class GcpSpeechService extends EventEmitter {
 
             this.isRunning = true
 
-            // Create new stream
-            await this.createStream()
+            // Create a stream for each language
+            for (const language of this.currentLanguages) {
+                await this.createStreamForLanguage(language)
+            }
 
-            console.log('GCP Speech transcription started')
+            console.log(`[GCP Parallel] ${this.currentLanguages.length} parallel recognizer(s) started`)
             return true
         } catch (error) {
-            console.error('Failed to start GCP Speech:', error)
+            console.error('[GCP Parallel] Failed to start:', error)
             return false
         }
     }
 
-    private async createStream(): Promise<void> {
-        // Map language codes
-        const languageMap: Record<string, string> = {
-            'auto': 'en-US',
-            'en': 'en-US',
-            'tr': 'tr-TR',
-            'en-US': 'en-US',
-            'tr-TR': 'tr-TR'
-        }
-
-        const languageCode = languageMap[this.currentLanguage] || 'en-US'
-
+    private async createStreamForLanguage(language: string): Promise<void> {
         const recognitionConfig: IRecognitionConfig = {
             encoding: this.currentEncoding as any,
             sampleRateHertz: 16000,
-            languageCode: languageCode,
+            languageCode: language,
             enableAutomaticPunctuation: this.currentAutoPunctuation,
             model: this.currentModel,
             useEnhanced: this.currentUseEnhanced,
@@ -115,69 +147,213 @@ export class GcpSpeechService extends EventEmitter {
             singleUtterance: this.currentSingleUtterance
         }
 
-        // Create streaming recognize request
-        this.recognizeStream = this.client!
+        const stream = this.client!
             ._streamingRecognize()
             .on('data', (response: protos.google.cloud.speech.v1.IStreamingRecognizeResponse) => {
-                if (response.results && response.results.length > 0) {
-                    const result = response.results[0]
-                    if (result.alternatives && result.alternatives.length > 0) {
-                        const transcript = result.alternatives[0].transcript
-                        // Emit transcript event for main process to handle broadcasting
-                        this.emit('transcript', {
-                            provider: 'GCP',
-                            text: transcript || '',
-                            isFinal: result.isFinal || false
-                        })
-                    }
-                }
+                this.handleStreamResult(language, response)
             })
             .on('error', (error: Error) => {
-                console.log('GCP Speech stream error, will auto-restart:', error.message)
-                this.scheduleRestart()
+                console.log(`[GCP Parallel] Stream error for ${language}, will auto-restart:`, error.message)
+                this.scheduleRestart(language)
             })
             .on('end', () => {
-                console.log('GCP Speech stream ended')
-                this.scheduleRestart()
+                console.log(`[GCP Parallel] Stream ended for ${language}`)
+                this.scheduleRestart(language)
             })
 
         // Send streaming config first
-        this.recognizeStream.write({ streamingConfig: streamingRequest })
+        stream.write({ streamingConfig: streamingRequest })
+
+        // Store the stream
+        this.languageStreams.set(language, {
+            stream,
+            language,
+            restartTimeout: null
+        })
+
+        console.log(`[GCP Parallel] Stream created for: ${language}`)
     }
 
-    private scheduleRestart(): void {
-        // Only restart if we're still supposed to be running
-        if (!this.isRunning) return
+    private handleStreamResult(
+        language: string,
+        response: protos.google.cloud.speech.v1.IStreamingRecognizeResponse
+    ): void {
+        if (!response.results || response.results.length === 0) return
 
-        // Clear any existing restart timeout
-        if (this.restartTimeout) {
-            clearTimeout(this.restartTimeout)
+        const result = response.results[0]
+        if (!result.alternatives || result.alternatives.length === 0) return
+
+        const alternative = result.alternatives[0]
+        const text = alternative.transcript || ''
+        const confidence = alternative.confidence || 0
+        const isFinal = result.isFinal || false
+
+        if (!text.trim()) return
+
+        console.log(`[GCP Parallel] ${language}: "${text.substring(0, 50)}..." (confidence: ${confidence.toFixed(3)}, final: ${isFinal})`)
+
+        if (isFinal) {
+            // For final results, emit immediately — only the highest confidence wins
+            this.handleFinalResult({ text, confidence, isFinal, language, timestamp: Date.now() })
+        } else {
+            // For interim results, debounce to collect from all streams
+            this.pendingInterimResults.set(language, {
+                text, confidence, isFinal, language, timestamp: Date.now()
+            })
+            this.scheduleInterimEmit()
+        }
+    }
+
+    // Language stickiness state
+    private dominantLanguage: string | null = null
+    private lastResultTime: number = 0
+    private static readonly SILENCE_RESET_MS = 3000 // Reset dominant language after 3s silence
+    private static readonly DOMINANT_BIAS = 0.3 // Bonus confidence for dominant language in interim selection
+
+    private handleFinalResult(result: LanguageResult): void {
+        const now = Date.now()
+
+        // Check for silence reset
+        if (now - this.lastResultTime > GcpSpeechService.SILENCE_RESET_MS) {
+            console.log(`[GCP Parallel] Silence detected (> ${GcpSpeechService.SILENCE_RESET_MS}ms), resetting dominant language`)
+            this.dominantLanguage = null
         }
 
-        // Restart after a short delay (100ms)
-        this.restartTimeout = setTimeout(async () => {
+        // Apply strict filtering based on dominant language
+        if (this.dominantLanguage && result.language !== this.dominantLanguage) {
+            // If another language tries to emit a final result while we are locked to a dominant language,
+            // we enforce a high confidence threshold to allow a switch.
+            // This filters out "Germany recorded" type hallucinations from the unused recognizer.
+            if (result.confidence < 0.9) {
+                console.log(`[GCP Parallel] 🛡️ Suppressed ${result.language} final result (conf: ${result.confidence.toFixed(3)}) due to active dominant language: ${this.dominantLanguage}`)
+                return
+            }
+            console.log(`[GCP Parallel] 🔄 Language switch detected! ${this.dominantLanguage} -> ${result.language} (conf: ${result.confidence.toFixed(3)})`)
+        }
+
+        // Clear interim debounce since we have a final result
+        if (this.interimDebounceTimer) {
+            clearTimeout(this.interimDebounceTimer)
+            this.interimDebounceTimer = null
+        }
+        this.pendingInterimResults.clear()
+
+        // Update state
+        this.dominantLanguage = result.language
+        this.lastResultTime = now
+
+        console.log(`[GCP Parallel] ✅ FINAL winner: ${result.language} (confidence: ${result.confidence.toFixed(3)})`)
+
+        this.emit('transcript', {
+            provider: 'GCP',
+            text: result.text,
+            isFinal: true,
+            confidence: result.confidence,
+            detectedLanguage: result.language
+        })
+    }
+
+    private scheduleInterimEmit(): void {
+        if (this.interimDebounceTimer) {
+            clearTimeout(this.interimDebounceTimer)
+        }
+
+        // Wait 150ms to collect interim results from all streams
+        this.interimDebounceTimer = setTimeout(() => {
+            this.emitBestInterim()
+        }, 150)
+    }
+
+    private emitBestInterim(): void {
+        if (this.pendingInterimResults.size === 0) return
+
+        const now = Date.now()
+
+        // Check for silence reset (also applies to interim streams)
+        if (now - this.lastResultTime > GcpSpeechService.SILENCE_RESET_MS) {
+            this.dominantLanguage = null
+        }
+
+        // Pick the result with the highest WEIGHTED confidence
+        let best: LanguageResult | null = null
+        let bestScore = -1
+
+        for (const result of this.pendingInterimResults.values()) {
+            let score = result.confidence
+
+            // Handle 0 confidence (common in interim) by using length heuristic as a small base score
+            if (score === 0) {
+                score = Math.min(result.text.length * 0.001, 0.1) // Cap heuristic contribution
+            }
+
+            // Apply bias if matches dominant language
+            if (this.dominantLanguage && result.language === this.dominantLanguage) {
+                score += GcpSpeechService.DOMINANT_BIAS
+            }
+
+            if (score > bestScore) {
+                bestScore = score
+                best = result
+            }
+        }
+
+        if (best) {
+            // Update state (keep locking to this language if it keeps winning)
+            // Only update active language if we have some reasonable confidence or it's already set
+            if (bestScore > 0.2 || this.dominantLanguage) {
+                this.dominantLanguage = best.language
+                this.lastResultTime = now
+            }
+
+            this.emit('transcript', {
+                provider: 'GCP',
+                text: best.text,
+                isFinal: false,
+                confidence: best.confidence,
+                detectedLanguage: best.language
+            })
+        }
+
+        this.pendingInterimResults.clear()
+    }
+
+    private scheduleRestart(language: string): void {
+        if (!this.isRunning) return
+
+        const entry = this.languageStreams.get(language)
+        if (entry?.restartTimeout) {
+            clearTimeout(entry.restartTimeout)
+        }
+
+        const timeout = setTimeout(async () => {
             if (this.isRunning) {
-                console.log('Auto-restarting GCP Speech stream...')
+                console.log(`[GCP Parallel] Auto-restarting stream for ${language}...`)
                 try {
-                    await this.createStream()
-                    console.log('GCP Speech stream restarted successfully')
+                    await this.createStreamForLanguage(language)
+                    console.log(`[GCP Parallel] Stream restarted for ${language}`)
                 } catch (error) {
-                    console.error('Failed to restart GCP stream:', error)
-                    // Try again after 1 second
-                    this.scheduleRestart()
+                    console.error(`[GCP Parallel] Failed to restart stream for ${language}:`, error)
+                    this.scheduleRestart(language)
                 }
             }
         }, 100)
+
+        if (entry) {
+            entry.restartTimeout = timeout
+        }
     }
 
-    // Method to receive audio chunks from renderer
+    // Fan out audio to ALL active language streams
     writeAudio(audioChunk: Buffer) {
-        if (this.recognizeStream && this.isRunning) {
-            try {
-                this.recognizeStream.write({ audioContent: audioChunk })
-            } catch (error) {
-                // Stream might be closed, will be restarted
-                console.log('Write error, stream will restart')
+        if (!this.isRunning) return
+
+        for (const [language, entry] of this.languageStreams.entries()) {
+            if (entry.stream) {
+                try {
+                    entry.stream.write({ audioContent: audioChunk })
+                } catch (error) {
+                    console.log(`[GCP Parallel] Write error for ${language}, stream will restart`)
+                }
             }
         }
     }
@@ -185,24 +361,33 @@ export class GcpSpeechService extends EventEmitter {
     async stop(): Promise<void> {
         this.isRunning = false
 
-        // Clear restart timeout
-        if (this.restartTimeout) {
-            clearTimeout(this.restartTimeout)
-            this.restartTimeout = null
+        // Clear interim debounce
+        if (this.interimDebounceTimer) {
+            clearTimeout(this.interimDebounceTimer)
+            this.interimDebounceTimer = null
         }
+        this.pendingInterimResults.clear()
 
-        if (this.recognizeStream) {
-            try {
-                this.recognizeStream.end()
-            } catch (e) {
-                // Ignore end errors
+        // Stop all language streams
+        for (const [language, entry] of this.languageStreams.entries()) {
+            if (entry.restartTimeout) {
+                clearTimeout(entry.restartTimeout)
             }
-            this.recognizeStream = null
+            if (entry.stream) {
+                try {
+                    entry.stream.end()
+                } catch (e) {
+                    // Ignore end errors
+                }
+            }
+            console.log(`[GCP Parallel] Stream stopped for ${language}`)
         }
+        this.languageStreams.clear()
+
         if (this.client) {
             await this.client.close()
             this.client = null
         }
-        console.log('GCP Speech transcription stopped')
+        console.log('[GCP Parallel] All streams stopped')
     }
 }

@@ -538,7 +538,7 @@ const toggleTranscription = async () => {
     if (provider === 'GCP') {
       await window.ipcRenderer.invoke('start-gcp-transcription', {
         gcpKeyJson: settings?.gcpKeyJson || '',
-        language: settings?.language || 'en-US',
+        languages: settings?.recognitionLanguages || ['en'], // Use parallel languages array
         gcpModel: settings?.gcpModel || 'latest_long',
         gcpEncoding: settings?.gcpEncoding || 'LINEAR16',
         gcpInterimResults: settings?.gcpInterimResults ?? true,
