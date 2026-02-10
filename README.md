@@ -1,5 +1,7 @@
 # Live Subtitle App 🎙️
 
+![Build Status](https://github.com/YOUR_USERNAME/live-subtitle-app/workflows/Build%20and%20Release/badge.svg)
+
 A cross-platform desktop application built with **Electron**, **Vue 3**, and **TypeScript** for real-time subtitling and window projection.
 
 Key Features:
@@ -47,6 +49,67 @@ pnpm run build
 ```
 
 The output files will be in the `release/` directory.
+
+#### Platform-Specific Builds
+
+Build for Windows only:
+```bash
+pnpm run build:win
+```
+
+Build for macOS only:
+```bash
+pnpm run build:mac
+```
+
+Build for all platforms:
+```bash
+pnpm run build:all
+```
+
+---
+
+## 📦 CI/CD & Releases
+
+### Automated Builds
+
+This project uses **GitHub Actions** to automatically build installers for Windows and macOS:
+
+- **On every push to `main`**: Builds are created and artifacts are uploaded
+- **On version tags** (e.g., `v1.0.0`): Builds are created and a GitHub Release is published automatically
+
+### Download Pre-built Installers
+
+Visit the [Releases page](https://github.com/YOUR_USERNAME/live-subtitle-app/releases) to download the latest installers:
+- **Windows**: `Live Subtitle App-Windows-X.X.X-Setup.exe`
+- **macOS**: `Live Subtitle App-Mac-X.X.X-Installer.dmg`
+
+### Creating a New Release
+
+To create a new release:
+
+1. Update the version in `package.json`:
+   ```json
+   "version": "1.0.0"
+   ```
+
+2. Commit the changes:
+   ```bash
+   git add package.json
+   git commit -m "Release v1.0.0"
+   ```
+
+3. Create and push a version tag:
+   ```bash
+   git tag v1.0.0
+   git push origin main
+   git push origin v1.0.0
+   ```
+
+4. GitHub Actions will automatically:
+   - Build Windows and macOS installers
+   - Create a new GitHub Release
+   - Upload the installers to the release
 
 ---
 

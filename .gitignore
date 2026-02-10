@@ -38,3 +38,6 @@ out/
 !package-lock.json
 !tsconfig.json
 !tsconfig.node.json
+
+# GitHub Actions
+.github/actions-cache/

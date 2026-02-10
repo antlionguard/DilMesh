@@ -1,11 +1,14 @@
 {
   "name": "live-subtitle-app",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build && electron-builder",
+    "build:win": "vue-tsc && vite build && electron-builder --win",
+    "build:mac": "vue-tsc && vite build && electron-builder --mac",
+    "build:all": "vue-tsc && vite build && electron-builder --win --mac",
     "preview": "vite preview"
   },
   "dependencies": {
