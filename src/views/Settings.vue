@@ -211,6 +211,26 @@
               <p class="text-xs text-gray-500 mt-1">Number of alternative transcriptions to return (1-10)</p>
             </div>
 
+            <!-- Confidence Threshold -->
+            <div>
+              <label class="block text-sm text-gray-400 mb-1">Confidence Threshold: {{ settings.gcpConfidenceThreshold }}</label>
+              <div class="flex items-center gap-4">
+                <input type="range" v-model.number="settings.gcpConfidenceThreshold" min="0" max="1" step="0.01" class="flex-1" />
+                <input type="number" v-model.number="settings.gcpConfidenceThreshold" min="0" max="1" step="0.01" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-center text-sm" />
+              </div>
+              <p class="text-xs text-yellow-500 mt-1">Minimum confidence score required to display a transcript. Results below this value will be hidden to reduce noise.</p>
+            </div>
+
+            <!-- Minimum Word Buffer -->
+            <div>
+              <label class="block text-sm text-gray-400 mb-1">Minimum Word Buffer: {{ settings.gcpMinWordBuffer }}</label>
+              <div class="flex items-center gap-4">
+                <input type="range" v-model.number="settings.gcpMinWordBuffer" min="0" max="10" step="1" class="flex-1" />
+                <input type="number" v-model.number="settings.gcpMinWordBuffer" min="0" max="10" step="1" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-center text-sm" />
+              </div>
+              <p class="text-xs text-blue-400 mt-1">Minimum number of words required before displaying interim results. Higher values reduce flickering but increase delay. Set to 0 to disable buffering.</p>
+            </div>
+
             <!-- Toggle Options -->
             <div class="grid grid-cols-2 gap-4">
               <label class="flex items-center gap-2 cursor-pointer">
@@ -304,6 +324,8 @@ const settings = ref({
   gcpUseEnhanced: false,
   gcpSingleUtterance: false,
   gcpMaxAlternatives: 1,
+  gcpConfidenceThreshold: 0.85,
+  gcpMinWordBuffer: 3,
   language: 'auto',
   model: 'small',
   audioDeviceId: undefined as string | undefined,

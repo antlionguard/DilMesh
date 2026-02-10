@@ -33,6 +33,8 @@ export class GcpSpeechService extends EventEmitter {
     private currentUseEnhanced: boolean = false
     private currentSingleUtterance: boolean = false
     private currentMaxAlternatives: number = 1
+    private currentConfidenceThreshold: number = 0.85
+    private currentMinWordBuffer: number = 3
 
     // Interim result debouncing
     private interimDebounceTimer: NodeJS.Timeout | null = null
@@ -77,7 +79,9 @@ export class GcpSpeechService extends EventEmitter {
         gcpAutoPunctuation?: boolean,
         gcpUseEnhanced?: boolean,
         gcpSingleUtterance?: boolean,
-        gcpMaxAlternatives?: number
+        gcpMaxAlternatives?: number,
+        gcpConfidenceThreshold?: number,
+        gcpMinWordBuffer?: number
     }): Promise<boolean> {
         try {
             // Store config
@@ -89,6 +93,8 @@ export class GcpSpeechService extends EventEmitter {
             this.currentUseEnhanced = config.gcpUseEnhanced ?? false
             this.currentSingleUtterance = config.gcpSingleUtterance ?? false
             this.currentMaxAlternatives = config.gcpMaxAlternatives ?? 1
+            this.currentConfidenceThreshold = config.gcpConfidenceThreshold ?? 0.85
+            this.currentMinWordBuffer = config.gcpMinWordBuffer ?? 3
 
             // Resolve languages: prefer array, fall back to single language
             if (config.languages && config.languages.length > 0) {
@@ -183,9 +189,19 @@ export class GcpSpeechService extends EventEmitter {
         const result = response.results[0]
         if (!result.alternatives || result.alternatives.length === 0) return
 
-        const alternative = result.alternatives[0]
-        const text = alternative.transcript || ''
-        const confidence = alternative.confidence || 0
+        // Find the best alternative based on confidence
+        // If maxAlternatives > 1, we want to pick the one with the highest confidence
+        let bestAlt = result.alternatives[0]
+        if (result.alternatives.length > 1) {
+            for (const alt of result.alternatives) {
+                if ((alt.confidence || 0) > (bestAlt.confidence || 0)) {
+                    bestAlt = alt
+                }
+            }
+        }
+
+        const text = bestAlt.transcript || ''
+        const confidence = bestAlt.confidence || 0
         const isFinal = result.isFinal || false
 
         if (!text.trim()) return
@@ -229,6 +245,12 @@ export class GcpSpeechService extends EventEmitter {
                 return
             }
             console.log(`[GCP Parallel] 🔄 Language switch detected! ${this.dominantLanguage} -> ${result.language} (conf: ${result.confidence.toFixed(3)})`)
+        }
+
+        // Apply user-defined confidence threshold filtering
+        if (result.confidence > 0 && result.confidence < this.currentConfidenceThreshold) {
+            console.log(`[GCP Parallel] 📉 Suppressed ${result.language} final result (conf: ${result.confidence.toFixed(3)}) below threshold: ${this.currentConfidenceThreshold}`)
+            return
         }
 
         // Clear interim debounce since we have a final result
@@ -298,6 +320,24 @@ export class GcpSpeechService extends EventEmitter {
         }
 
         if (best) {
+            // Apply threshold filter even for interim results
+            // If best.confidence is real (>0) and below threshold, skip
+            if (best.confidence > 0 && best.confidence < this.currentConfidenceThreshold) {
+                // console.log(`[GCP Parallel] Suppressed interim (conf: ${best.confidence.toFixed(3)}) below threshold`)
+                this.pendingInterimResults.clear()
+                return
+            }
+
+            // Apply word buffer filter for interim results
+            // Count words in the text (split by whitespace)
+            const wordCount = best.text.trim().split(/\s+/).filter(w => w.length > 0).length
+
+            if (this.currentMinWordBuffer > 0 && wordCount < this.currentMinWordBuffer) {
+                // console.log(`[GCP Parallel] Buffering interim (${wordCount} words < ${this.currentMinWordBuffer} minimum)`)
+                this.pendingInterimResults.clear()
+                return
+            }
+
             // Update state (keep locking to this language if it keeps winning)
             // Only update active language if we have some reasonable confidence or it's already set
             if (bestScore > 0.2 || this.dominantLanguage) {
