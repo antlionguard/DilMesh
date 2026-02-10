@@ -1,139 +1,124 @@
-# Live Subtitle App 🎙️
+<!-- Header Image Placeholder -->
+<div align="center">
+  <img src="public/header-image.png" alt="DilMesh Header" width="100%" /> 
+  <!-- If you don't have an image yet, this will just show the alt text or broken image icon. Replaced once you add the file. -->
+</div>
 
-![Build Status](https://github.com/YOUR_USERNAME/live-subtitle-app/workflows/Build%20and%20Release/badge.svg)
+# DilMesh 🎙️🌐
 
-A cross-platform desktop application built with **Electron**, **Vue 3**, and **TypeScript** for real-time subtitling and window projection.
+> **Live Instant Subtitles & Real-time Multi-language Translation**
 
-Key Features:
-- **Multi-Window Projection:** Create separate subtitle windows for OBS/Streaming.
-- **Customizable Styles:** Adjust fonts, colors, chroma key backgrounds, and layout.
-- **AWS Transcribe Integration:** High-accuracy real-time speech-to-text.
-- **Display Management:** Send projection windows to specific monitors in fullscreen.
-- **Persistence:** Save and restore window configurations instantly.
+DilMesh is a powerful desktop application that provides real-time speech-to-text and instant translation, capable of broadcasting subtitles to multiple windows simultaneously. It's designed for streamers, presenters, and anyone needing accessible, multilingual communication on the fly.
 
----
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Electron](https://img.shields.io/badge/Electron-30.0.1-blue?logo=electron)](https://www.electronjs.org/)
+[![Vue 3](https://img.shields.io/badge/Vue.js-3.4.21-4FC08D?logo=vue.js)](https://vuejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.2.2-3178C6?logo=typescript)](https://www.typescriptlang.org/)
 
-## 🚀 Getting Started
+
+## ✨ Key Features
+
+- **🎙️ Real-time Speech-to-Text**: High-accuracy transcription using **Google Cloud Speech-to-Text** or **OpenAI Whisper (Local)**.
+- **🌐 Instant Multi-language Translation**: Translate spoken audio into multiple languages simultaneously (e.g., English -> Turkish, Spanish, French) in real-time.
+- **🖥️ Multi-Window Broadcasting**: Create separate, customizable subtitle windows for different displays or OBS scenes. Each window can display a different language!
+- **🎨 Highly Customizable**: 
+  - Adjust font size, color, background (chroma key), and positioning.
+  - **Analog VU Meter**: Visual audio feedback with peak indicators.
+- **🔄 System Tray Integration**: Minimized to tray for unobtrusive operation.
+- **🚀 Performance Optimized**: Built with Electron + Vite + Vue 3 for a snappy experience.
+- **🔜 Future API Support**: We are actively working on adding more speech-to-text and translation providers (e.g., DeepL, Azure, AWS, and more). Stay tuned!
+
+## � Screenshots
+
+### 🎛️ Dashboard
+_Control all your settings, transcription status, and active windows from a single place._
+<div align="center">
+  <img src="public/dashboard.png" alt="DilMesh Dashboard" width="800" style="border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" />
+  <!-- Place your dashboard screenshot as 'dashboard.png' in the root directory -->
+</div>
+
+### 🔲 Multi-Window & Fullscreen Projection
+_Broadcast subtitles to multiple windows or project them fullscreen on specific displays. Each output can have different languages, styles, and positioning._
+<div align="center">
+  <img src="public/windows.png" alt="DilMesh Projection" width="800" style="border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" />
+  <!-- Place your windows screenshot as 'windows.png' in the root directory -->
+</div>
+
+## 🚀 Installation
 
 ### Prerequisites
 
-- **Node.js**: v18+ recommended
-- **pnpm**: Package manager (Install: `npm install -g pnpm`)
+- **Node.js** (v18 or higher recommended)
+- **Node.js** (v18 or higher recommended)
+- **pnpm** (This project uses pnpm for package management)
+- **Google Cloud Platform Account** (Optional, for higher accuracy and translation features)
 
-### 1. Installation
+### Setup
 
-Clone the repository and install dependencies:
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/antlionguard/dilmesh.git
+    cd dilmesh
+    ```
 
-```bash
-git clone <repository-url>
-cd live-subtitle-app
-pnpm install
-```
+2.  **Install dependencies:**
+    ```bash
+    pnpm install
+    ```
 
-### 2. Development Mode
+3.  **Run in Development Mode:**
+    ```bash
+    pnpm dev
+    ```
 
-Run the app locally with hot-reload (Vue & Electron):
+## 📦 Build
 
-```bash
-pnpm run dev
-```
+To create a distributable application for your OS:
 
-This will launch the main Dashboard window.
+- **macOS (DMG/App):**
+  ```bash
+  pnpm build:mac
+  ```
 
-### 3. Build for Production
-
-To create a distributable application (dmg/exe/deb):
-
-```bash
-pnpm run build
-```
-
-The output files will be in the `release/` directory.
-
-#### Platform-Specific Builds
-
-Build for Windows only:
-```bash
-pnpm run build:win
-```
-
-Build for macOS only:
-```bash
-pnpm run build:mac
-```
-
-Build for all platforms:
-```bash
-pnpm run build:all
-```
-
----
-
-## 📦 CI/CD & Releases
-
-### Automated Builds
-
-This project uses **GitHub Actions** to automatically build installers for Windows and macOS:
-
-- **On every push to `main`**: Builds are created and artifacts are uploaded
-- **On version tags** (e.g., `v1.0.0`): Builds are created and a GitHub Release is published automatically
-
-### Download Pre-built Installers
-
-Visit the [Releases page](https://github.com/YOUR_USERNAME/live-subtitle-app/releases) to download the latest installers:
-- **Windows**: `Live Subtitle App-Windows-X.X.X-Setup.exe`
-- **macOS**: `Live Subtitle App-Mac-X.X.X-Installer.dmg`
-
-### Creating a New Release
-
-To create a new release:
-
-1. Update the version in `package.json`:
-   ```json
-   "version": "1.0.0"
-   ```
-
-2. Commit the changes:
-   ```bash
-   git add package.json
-   git commit -m "Release v1.0.0"
-   ```
-
-3. Create and push a version tag:
-   ```bash
-   git tag v1.0.0
-   git push origin main
-   git push origin v1.0.0
-   ```
-
-4. GitHub Actions will automatically:
-   - Build Windows and macOS installers
-   - Create a new GitHub Release
-   - Upload the installers to the release
-
----
+- **Windows (NSIS/Portable):**
+  ```bash
+  pnpm build:win
+  ```
 
 ## ⚙️ Configuration
 
-### AWS Credentials (Optional but Recommended)
-For high-quality transcription, you need an AWS account with access to **Amazon Transcribe Streaming**.
+### Google Cloud (Recommended for Best Experience)
 
-1. Go to AWS Console -> IAM.
-2. Create a user with `AmazonTranscribeFullAccess` (or specific streaming permissions).
-3. Get the **Access Key ID** and **Secret Access Key**.
-4. In the App Dashboard, click **Settings**, select **AWS**, and enter your credentials.
+1.  Create a project in [Google Cloud Console](https://console.cloud.google.com/).
+2.  Enable **Cloud Speech-to-Text API** and **Cloud Translation API**.
+3.  Create a Service Account and download the **JSON Key File**.
+4.  In DilMesh, go to **Settings** -> **Transcription Provider** -> **Google Cloud Platform**.
+5.  Paste the contents of your JSON key file.
 
-### Mock Mode (Default)
-If no credentials are provided, the app runs in **Mock Mode**, generating random lorem ipsum text for testing UI and layout.
+### Local Whisper (Free, Offline)
 
----
+1.  Go to **Settings**.
+2.  Select **Local Whisper**.
+3.  Choose a model size (`tiny`, `base`, `small`). *Note: Requires downloading the model on first use.*
 
-## 🛠️ Tech Stack
+## 🤝 Contributing
 
-- **Electron**: Desktop runtime
-- **Vue 3**: Frontend framework
-- **Vite**: Build tool and dev server
-- **TypeScript**: Type safety
-- **TailwindCSS**: Styling
-- **Pinia**: State management (ready for use)
-- **AWS SDK v3**: Transcription service
+We love contributions! Whether it's fixing bugs, adding new languages, or implementing new features from our roadmap. Please feel free to submit a Pull Request.
+
+1.  Fork the Project
+2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4.  Push to the Branch (`git push origin feature/AmazingFeature`)
+5.  Open a Pull Request
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
+
+## ❤️ Support
+
+If you find this project useful, you can support its development!
+
+<a href="https://www.buymeacoffee.com/antlionguards" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50" width="180" />
+</a>

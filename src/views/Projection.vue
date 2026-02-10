@@ -16,6 +16,9 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
 
 const currentText = ref('Waiting for subtitles...')
 
@@ -66,6 +69,11 @@ const textStyle = computed((): CSSProperties => ({
 
 
 onMounted(async () => {
+  // Set initial title from query param
+  if (route.query.title) {
+    document.title = `${route.query.title} - DilMesh`
+  }
+
   // Listen for transcript updates from main process (centralized)
   window.ipcRenderer.on('transcript-update', (_event, result: any) => {
     currentText.value = result.text
@@ -75,6 +83,9 @@ onMounted(async () => {
   window.ipcRenderer.on('settings-updated', async (_event, settings: any) => {
     if (settings.style) {
       style.value = settings.style
+    }
+    if (settings.title) {
+      document.title = `${settings.title} - DilMesh`
     }
   })
 })

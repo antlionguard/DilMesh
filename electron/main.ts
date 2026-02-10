@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } from 'electron'
 import { setupStoreHandlers, store } from './store'
 import { LocalWhisperService } from './LocalWhisperService'
 import { GcpSpeechService } from './GcpSpeechService'
@@ -32,6 +32,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 
 let mainWindow: BrowserWindow | null
 const projectionWindows = new Map<string, BrowserWindow>()
+let tray: Tray | null = null
 
 // Centralized transcription services
 let localWhisperService: LocalWhisperService | null = null
@@ -80,7 +81,7 @@ function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    icon: path.join(process.env.VITE_PUBLIC, 'tray-icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
     },
@@ -98,15 +99,19 @@ function createMainWindow() {
   }
 }
 
-function createProjectionWindow(id: string) {
+function createProjectionWindow(id: string, title: string = 'Projection') {
+  const windowTitle = `${title} - DilMesh`
   const win = new BrowserWindow({
     width: 800,
     height: 200,
+    title: windowTitle, // Set initial title
+
     // frame: false, // Frameless for subtitles
     titleBarStyle: 'hidden', // Hide title bar but keep traffic lights
     trafficLightPosition: { x: 10, y: 10 },
     transparent: true, // Transparent support
     hasShadow: false,
+    icon: path.join(process.env.VITE_PUBLIC, 'tray-icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
     }
@@ -115,8 +120,8 @@ function createProjectionWindow(id: string) {
   projectionWindows.set(id, win)
 
   const url = VITE_DEV_SERVER_URL
-    ? `${VITE_DEV_SERVER_URL}#/projection/${id}`
-    : `file://${path.join(RENDERER_DIST, 'index.html')}#/projection/${id}`
+    ? `${VITE_DEV_SERVER_URL}#/projection/${id}?title=${encodeURIComponent(title)}`
+    : `file://${path.join(RENDERER_DIST, 'index.html')}#/projection/${id}?title=${encodeURIComponent(title)}`
 
   win.loadURL(url)
 
@@ -135,6 +140,50 @@ app.on('window-all-closed', () => {
   }
 })
 
+function createTray() {
+  const iconPath = path.join(process.env.VITE_PUBLIC, 'tray-icon.png')
+  const icon = nativeImage.createFromPath(iconPath)
+  // Resize if needed, standard tray icons are small (16x16 or 22x22)
+  tray = new Tray(icon.resize({ width: 22, height: 22 }))
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Show Dashboard',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show()
+          mainWindow.focus()
+        } else {
+          createMainWindow()
+        }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit DilMesh',
+      click: () => {
+        app.quit()
+      }
+    }
+  ])
+
+  tray.setToolTip('DilMesh')
+  tray.setContextMenu(contextMenu)
+
+  tray.on('click', () => {
+    if (mainWindow) {
+      if (mainWindow.isVisible()) {
+        mainWindow.hide()
+      } else {
+        mainWindow.show()
+        mainWindow.focus()
+      }
+    }
+  })
+}
+
+app.setName('DilMesh')
+
 app.on('activate', () => {
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
@@ -144,7 +193,12 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin') {
+    app.dock.setIcon(path.join(process.env.VITE_PUBLIC, 'tray-icon.png'))
+  }
+
   setupStoreHandlers()
+  createTray()
   createMainWindow()
 
   // Initialize centralized transcription services (only once)
@@ -187,16 +241,21 @@ app.whenReady().then(() => {
 
   // Note: GcpSpeechService will emit transcript events that we listen to above
 
-  ipcMain.handle('create-projection-window', (_, id) => {
+  ipcMain.handle('create-projection-window', (_, args: any) => {
+    // Handle both old (string ID) and new (object) formats for backward compatibility
+    const id = typeof args === 'string' ? args : args.id
+    const title = typeof args === 'object' ? args.title : undefined
+
     if (projectionWindows.has(id)) {
       const existing = projectionWindows.get(id)
       if (existing && !existing.isDestroyed()) {
+        if (title) existing.setTitle(`${title} - DilMesh`)
         existing.show()
         existing.focus()
         return
       }
     }
-    createProjectionWindow(id)
+    createProjectionWindow(id, title)
   })
 
   ipcMain.handle('get-active-windows', () => {
@@ -213,7 +272,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('update-projection-settings', (_, { id, ...settings }: { id: string, [key: string]: any }) => {
     const win = projectionWindows.get(id)
-    if (win) {
+    if (win && !win.isDestroyed()) {
+      if (settings.title) {
+        win.setTitle(`${settings.title} - DilMesh`)
+      }
       win.webContents.send('settings-updated', settings)
     }
   })
@@ -275,6 +337,15 @@ app.whenReady().then(() => {
   // Handler to get window language preference
   ipcMain.handle('get-window-language', (_, { windowId }) => {
     return windowLanguagePreferences.get(windowId) || 'live'
+  })
+
+  // Handler to update GCP credentials dynamically
+  ipcMain.handle('update-gcp-credentials', (_, keyJson) => {
+    if (gcpTranslationService) {
+      console.log('Updating GCP credentials for Translation Service...')
+      return gcpTranslationService.initialize(keyJson)
+    }
+    return false
   })
 
 

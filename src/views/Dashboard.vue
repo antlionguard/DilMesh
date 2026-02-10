@@ -2,26 +2,13 @@
   <div class="h-full bg-gray-900 text-white p-6 flex flex-col overflow-hidden">
     <header class="mb-4 flex-none flex justify-between items-center gap-4">
       <h1 class="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-        Dashboard
+        DilMesh
       </h1>
       
       <!-- VU Meter -->
       <div class="flex-1 max-w-md">
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-gray-400 w-12">MIC</span>
-          <div class="flex-1 h-6 bg-gray-800 rounded-full overflow-hidden border border-gray-700">
-            <div 
-              class="h-full transition-all duration-75 ease-out"
-              :style="{
-                width: `${audioLevel}%`,
-                background: audioLevel > 80 ? 'linear-gradient(90deg, #10b981, #ef4444)' : 
-                           audioLevel > 50 ? 'linear-gradient(90deg, #10b981, #f59e0b)' : 
-                           'linear-gradient(90deg, #10b981, #10b981)'
-              }"
-            ></div>
-          </div>
-          <span class="text-xs text-gray-400 w-8 text-right">{{ Math.round(audioLevel) }}</span>
-        </div>
+        <AnalogVuMeter v-if="selectedAudioDeviceId" :device-id="selectedAudioDeviceId" />
+        <div v-else class="text-xs text-gray-500 text-center">Loading Audio Device...</div>
       </div>
       
       <div class="flex gap-2">
@@ -89,6 +76,10 @@
              <div class="flex items-center gap-2 text-xs text-gray-400">
                 <span>🖥️</span>
                 <span>{{ getDisplayLabel(preset.targetDisplayId) }}</span>
+             </div>
+             <div class="flex items-center gap-2 text-xs text-gray-400">
+                <span>🌐</span>
+                <span>{{ getLanguageLabel(preset.language) }}</span>
              </div>
           </div>
 
@@ -225,8 +216,6 @@
                    </select>
                    <p class="text-xs text-gray-500 mt-1">Select 'Live Captions' for original text, or choose a language for real-time translation.</p>
                  </div>
-                 
-                 <p class="text-xs text-gray-400">💡 Microphone is now configured globally in Settings.</p>
                </div>
              </div>
             
@@ -276,6 +265,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import AnalogVuMeter from '../components/AnalogVuMeter.vue'
 
 interface WindowStyle {
   backgroundColor: string
@@ -301,7 +291,7 @@ interface WindowPreset {
 const presets = ref<WindowPreset[]>([])
 const activeWindows = ref<Set<string>>(new Set()) // Track IDs of open windows
 const isTranscribing = ref(false)
-const audioLevel = ref(0) // VU meter level (0-100)
+const selectedAudioDeviceId = ref<string>('')
 
 // GCP Audio streaming state
 let gcpAudioStream: MediaStream | null = null
@@ -324,8 +314,14 @@ onMounted(async () => {
   const activeIds = await window.ipcRenderer.invoke('get-active-windows')
   activeWindows.value = new Set(activeIds)
   
-  // Start VU meter monitoring
-  startVUMeter()
+  // Initialize VU Meter device
+  const settings = await window.ipcRenderer.invoke('get-settings', 'transcription')
+  if (settings && settings.audioDeviceId) {
+    selectedAudioDeviceId.value = settings.audioDeviceId
+  } else if (audioDevices.value.length > 0) {
+    // Fallback to first available device if no setting
+    selectedAudioDeviceId.value = audioDevices.value[0].deviceId
+  }
 })
 
 const getDisplays = async () => {
@@ -348,8 +344,28 @@ const getDisplayLabel = (id?: number) => {
   return d ? d.label : 'Unknown Display'
 }
 
+const getLanguageLabel = (code?: string) => {
+  const languages: Record<string, string> = {
+    'live': '🎙️ Live',
+    'en': '🇬🇧 English',
+    'tr': '🇹🇷 Turkish',
+    'es': '🇪🇸 Spanish',
+    'fr': '🇫🇷 French',
+    'de': '🇩🇪 German',
+    'it': '🇮🇹 Italian',
+    'pt': '🇵🇹 Portuguese',
+    'ru': '🇷🇺 Russian',
+    'ja': '🇯🇵 Japanese',
+    'ko': '🇰🇷 Korean',
+    'zh': '🇨🇳 Chinese',
+    'ar': '🇸🇦 Arabic',
+  }
+  return languages[code || 'live'] || code || '🎙️ Live'
+}
+
 onUnmounted(() => {
-  stopVUMeter()
+  // Stop GCP if active
+  stopGcpAudioCapture()
 })
 
 const loadPresets = async () => {
@@ -435,7 +451,8 @@ const updateLiveWindow = (preset: WindowPreset) => {
     // Send style update
     window.ipcRenderer.invoke('update-projection-settings', { 
       id: preset.id, 
-      style: plainStyle
+      style: plainStyle,
+      title: preset.name
     })
     // Send audio update
     if (preset.audioDeviceId) {
@@ -459,7 +476,10 @@ const reloadWindow = async (id: string) => {
 
 const openWindow = async (preset: WindowPreset) => {
   try {
-    await window.ipcRenderer.invoke('create-projection-window', preset.id)
+    await window.ipcRenderer.invoke('create-projection-window', { 
+      id: preset.id, 
+      title: preset.name 
+    })
     activeWindows.value.add(preset.id)
     
     // Set language preference for this window
@@ -497,60 +517,6 @@ const closeWindow = async (id: string) => {
 
 const selectPreset = (preset: WindowPreset) => {
   selectedPresetId.value = preset.id
-}
-
-let vuMeterStream: MediaStream | null = null
-let vuMeterContext: AudioContext | null = null
-let vuMeterAnalyser: AnalyserNode | null = null
-let vuMeterAnimationFrame: number | null = null
-
-const startVUMeter = async () => {
-  try {
-    const settings = await window.ipcRenderer.invoke('get-settings', 'transcription')
-    const deviceId = settings?.audioDeviceId
-    
-    const constraints: MediaStreamConstraints = {
-      audio: deviceId ? { deviceId: { exact: deviceId } } : true
-    }
-    
-    vuMeterStream = await navigator.mediaDevices.getUserMedia(constraints)
-    vuMeterContext = new AudioContext()
-    vuMeterAnalyser = vuMeterContext.createAnalyser()
-    vuMeterAnalyser.fftSize = 256
-    vuMeterAnalyser.smoothingTimeConstant = 0.8
-    
-    const source = vuMeterContext.createMediaStreamSource(vuMeterStream)
-    source.connect(vuMeterAnalyser)
-    
-    const dataArray = new Uint8Array(vuMeterAnalyser.frequencyBinCount)
-    
-    const updateLevel = () => {
-      vuMeterAnalyser!.getByteFrequencyData(dataArray)
-      const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
-      audioLevel.value = Math.min(100, (average / 128) * 100)
-      vuMeterAnimationFrame = requestAnimationFrame(updateLevel)
-    }
-    
-    updateLevel()
-  } catch (error) {
-    console.error('Failed to start VU meter:', error)
-  }
-}
-
-const stopVUMeter = () => {
-  if (vuMeterAnimationFrame) {
-    cancelAnimationFrame(vuMeterAnimationFrame)
-    vuMeterAnimationFrame = null
-  }
-  if (vuMeterStream) {
-    vuMeterStream.getTracks().forEach(track => track.stop())
-    vuMeterStream = null
-  }
-  if (vuMeterContext) {
-    vuMeterContext.close()
-    vuMeterContext = null
-  }
-  audioLevel.value = 0
 }
 
 const toggleTranscription = async () => {
@@ -608,7 +574,7 @@ const startGcpAudioCapture = async () => {
   try {
     gcpAudioStream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        sampleRate: 16000, // GCP expects 16kHz
+        sampleRate: 16000, 
         channelCount: 1,
         echoCancellation: true,
         noiseSuppression: true
@@ -623,7 +589,7 @@ const startGcpAudioCapture = async () => {
     
     gcpScriptProcessor.onaudioprocess = (event) => {
       const inputData = event.inputBuffer.getChannelData(0)
-      // Convert Float32Array to Int16Array (LINEAR16 format for GCP)
+      // Convert Float32Array to Int16Array
       const int16Data = new Int16Array(inputData.length)
       for (let i = 0; i < inputData.length; i++) {
         const s = Math.max(-1, Math.min(1, inputData[i]))
@@ -661,7 +627,6 @@ const stopGcpAudioCapture = () => {
 // Watch for changes in selected preset to auto-update live window (Real-time styling)
 watch(() => selectedPreset.value, (newVal) => {
   if (newVal && activeWindows.value.has(newVal.id)) {
-    // Debounce this slightly? Or just update.
     updateLiveWindow(newVal)
   }
 }, { deep: true })

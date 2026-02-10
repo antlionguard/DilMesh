@@ -57,7 +57,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: release/**/Live Subtitle App-Windows-*.exe
+          path: release/**/DilMesh-Windows-*.exe
           retention-days: 30
 
   build-macos:
@@ -102,7 +102,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-installer
-          path: release/**/Live Subtitle App-Mac-*.dmg
+          path: release/**/DilMesh-Mac-*.dmg
           retention-days: 30
 
   release:

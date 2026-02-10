@@ -154,80 +154,121 @@
           </div>
         </div>
 
-        <div v-if="settings.provider === 'GCP'" class="space-y-4 p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
-          <h3 class="text-lg font-medium mb-3 text-blue-400">Google Cloud Configuration</h3>
-          
-          <!-- Model Selection -->
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">Speech Model</label>
-            <select v-model="settings.gcpModel" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2">
-              <option value="latest_long">Latest Long — Best for conversations (🌍 All languages)</option>
-              <option value="latest_short">Latest Short — Short utterances (🌍 All languages)</option>
-              <option value="default">Default — General purpose (🌍 All languages)</option>
-              <option value="phone_call">Phone Call — Optimized for calls (🇺🇸 English only)</option>
-              <option value="video">Video — Optimized for video (🇺🇸 English only)</option>
-            </select>
-            <p class="text-xs text-yellow-500 mt-1">⚠️ Phone Call & Video models only support English. Use Latest Long for Turkish.</p>
+          <div v-if="settings.provider === 'GCP'" class="space-y-4 p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
+            <h3 class="text-lg font-medium mb-3 text-blue-400">Google Cloud Speech-to-Text</h3>
+            
+            <!-- Pricing Info -->
+            <div class="bg-blue-900/20 border border-blue-500/30 rounded p-3 mb-4 text-xs text-blue-200">
+              <p class="font-bold mb-1">💰 Pricing & Free Tier:</p>
+              <ul class="list-disc list-inside space-y-1 opacity-90">
+                <li><strong>Standard Models:</strong> FREE for first 60 min/month. Then $0.024/min.</li>
+                <li><strong>Enhanced Models:</strong> NOT Free (usually). $0.036/min.</li>
+                <li>The "Standard" models below are eligible for the monthly free tier.</li>
+              </ul>
+            </div>
+
+            <!-- Model Selection -->
+            <div>
+              <label class="block text-sm text-gray-400 mb-1">Speech Model</label>
+              <select v-model="settings.gcpModel" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2">
+                <optgroup label="✨ Enhanced / Premium (Paid - $0.036/min)">
+                  <option value="latest_long">Latest Long — Best for conversations (🌍 All languages)</option>
+                  <option value="latest_short">Latest Short — Short utterances (🌍 All languages)</option>
+                </optgroup>
+                <optgroup label="🎁 Standard / Free Tier Eligible ($0.024/min)">
+                  <option value="default">Default — General purpose (🌍 All languages)</option>
+                  <option value="command_and_search">Command & Search — Short commands</option>
+                  <option value="phone_call">Phone Call — Optimized for calls (🇺🇸 English only)</option>
+                  <option value="video">Video — Optimized for video (🇺🇸 English only)</option>
+                </optgroup>
+              </select>
+              <p class="text-xs text-yellow-500 mt-1">⚠️ Phone Call & Video models only support English. Use Latest Long for Turkish.</p>
+            </div>
+
+            <!-- Encoding -->
+            <div>
+              <label class="block text-sm text-gray-400 mb-1">Audio Encoding</label>
+              <select v-model="settings.gcpEncoding" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2">
+                <option value="LINEAR16">LINEAR16 (Uncompressed 16-bit PCM)</option>
+                <option value="FLAC">FLAC (Lossless compression)</option>
+                <option value="MULAW">MULAW (8-bit telephony)</option>
+                <option value="OGG_OPUS">OGG_OPUS (Opus in Ogg container)</option>
+              </select>
+              <p class="text-xs text-gray-500 mt-1">LINEAR16 recommended for best quality</p>
+            </div>
+
+            <!-- Max Alternatives -->
+            <div>
+              <label class="block text-sm text-gray-400 mb-1">Max Alternatives: {{ settings.gcpMaxAlternatives }}</label>
+              <input type="range" v-model.number="settings.gcpMaxAlternatives" min="1" max="10" class="w-full" />
+              <p class="text-xs text-gray-500 mt-1">Number of alternative transcriptions to return (1-10)</p>
+            </div>
+
+            <!-- Toggle Options -->
+            <div class="grid grid-cols-2 gap-4">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" v-model="settings.gcpInterimResults" class="w-4 h-4 rounded border-gray-600" />
+                <span class="text-sm text-gray-300">Interim Results</span>
+              </label>
+              <p class="text-xs text-gray-500 col-span-2 -mt-2">Show partial results while speaking</p>
+
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" v-model="settings.gcpAutoPunctuation" class="w-4 h-4 rounded border-gray-600" />
+                <span class="text-sm text-gray-300">Auto Punctuation</span>
+              </label>
+              <p class="text-xs text-gray-500 col-span-2 -mt-2">Automatically add punctuation marks</p>
+
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" v-model="settings.gcpUseEnhanced" class="w-4 h-4 rounded border-gray-600" />
+                <span class="text-sm text-gray-300">Use Enhanced Model</span>
+              </label>
+              <p class="text-xs text-yellow-500 col-span-2 -mt-2">Enable this if using Enhanced models above</p>
+
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" v-model="settings.gcpSingleUtterance" class="w-4 h-4 rounded border-gray-600" />
+                <span class="text-sm text-gray-300">Single Utterance</span>
+              </label>
+              <p class="text-xs text-gray-500 col-span-2 -mt-2">Stop after first speech pause</p>
+            </div>
+
+            <hr class="border-gray-700 my-4" />
+
+            <h3 class="text-lg font-medium mb-3 text-purple-400">Google Cloud Translation</h3>
+            
+            <!-- Translation Pricing Info -->
+            <div class="bg-purple-900/20 border border-purple-500/30 rounded p-3 mb-4 text-xs text-purple-200">
+              <p class="font-bold mb-1">💰 Pricing & Free Tier:</p>
+              <ul class="list-disc list-inside space-y-1 opacity-90">
+                <li><strong>Basic (V2):</strong> FREE for first 500,000 chars/month. Then $20/1M chars.</li>
+                <li><strong>Advanced (V3):</strong> NO Free Tier. $20/million chars.</li>
+              </ul>
+            </div>
+
+            <!-- Translation Model Selection -->
+            <div>
+               <label class="block text-sm text-gray-400 mb-1">Translation Edition</label>
+               <select v-model="settings.gcpTranslationModel" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2">
+                 <option value="v2">🎁 Basic (V2) — Free Tier Eligible</option>
+                 <option value="v3" disabled>✨ Advanced (V3) — Paid Only (Coming Soon)</option>
+               </select>
+               <p class="text-xs text-gray-500 mt-1">Currently using Basic edition which supports the monthly free tier.</p>
+            </div>
+
+            <!-- Service Account Key -->
+            <div class="pt-2">
+              <label class="block text-sm text-gray-400 mb-1">Service Account Key (JSON)</label>
+              <textarea 
+                v-model="settings.gcpKeyJson" 
+                rows="4" 
+                class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 font-mono text-xs"
+                placeholder='Paste your service account JSON key here...'
+              ></textarea>
+              <p class="text-xs text-gray-500 mt-1">
+                Required for both Speech-to-Text and Translation. Get this from: <br/>
+                Google Cloud Console → IAM & Admin → Service Accounts → Create Key
+              </p>
+            </div>
           </div>
-
-          <!-- Encoding -->
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">Audio Encoding</label>
-            <select v-model="settings.gcpEncoding" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2">
-              <option value="LINEAR16">LINEAR16 (Uncompressed 16-bit PCM)</option>
-              <option value="FLAC">FLAC (Lossless compression)</option>
-              <option value="MULAW">MULAW (8-bit telephony)</option>
-              <option value="OGG_OPUS">OGG_OPUS (Opus in Ogg container)</option>
-            </select>
-            <p class="text-xs text-gray-500 mt-1">LINEAR16 recommended for best quality</p>
-          </div>
-
-          <!-- Max Alternatives -->
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">Max Alternatives: {{ settings.gcpMaxAlternatives }}</label>
-            <input type="range" v-model.number="settings.gcpMaxAlternatives" min="1" max="10" class="w-full" />
-            <p class="text-xs text-gray-500 mt-1">Number of alternative transcriptions to return (1-10)</p>
-          </div>
-
-          <!-- Toggle Options -->
-          <div class="grid grid-cols-2 gap-4">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" v-model="settings.gcpInterimResults" class="w-4 h-4 rounded border-gray-600" />
-              <span class="text-sm text-gray-300">Interim Results</span>
-            </label>
-            <p class="text-xs text-gray-500 col-span-2 -mt-2">Show partial results while speaking</p>
-
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" v-model="settings.gcpAutoPunctuation" class="w-4 h-4 rounded border-gray-600" />
-              <span class="text-sm text-gray-300">Auto Punctuation</span>
-            </label>
-            <p class="text-xs text-gray-500 col-span-2 -mt-2">Automatically add punctuation marks</p>
-
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" v-model="settings.gcpUseEnhanced" class="w-4 h-4 rounded border-gray-600" />
-              <span class="text-sm text-gray-300">Use Enhanced Model</span>
-            </label>
-            <p class="text-xs text-gray-500 col-span-2 -mt-2">Higher accuracy (costs more)</p>
-
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" v-model="settings.gcpSingleUtterance" class="w-4 h-4 rounded border-gray-600" />
-              <span class="text-sm text-gray-300">Single Utterance</span>
-            </label>
-            <p class="text-xs text-gray-500 col-span-2 -mt-2">Stop after first speech pause (for commands)</p>
-          </div>
-
-          <!-- Service Account Key -->
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">Service Account Key (JSON)</label>
-            <textarea 
-              v-model="settings.gcpKeyJson" 
-              rows="4" 
-              class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 font-mono text-xs"
-              placeholder='Paste your service account JSON key here...'
-            ></textarea>
-            <p class="text-xs text-gray-500 mt-1">Get this from Google Cloud Console → IAM & Admin → Service Accounts → Create Key</p>
-          </div>
-        </div>
       </div>
 
       <div class="mt-8 flex justify-end">
@@ -250,6 +291,7 @@ const settings = ref({
   gcpKeyJson: '',
   gcpModel: 'latest_long',
   gcpEncoding: 'LINEAR16',
+  gcpTranslationModel: 'v2',
   gcpInterimResults: true,
   gcpAutoPunctuation: true,
   gcpUseEnhanced: false,
@@ -345,7 +387,14 @@ const deleteModel = async (modelId: string) => {
 }
 
 const saveSettings = async () => {
+  // Save to store
   await window.ipcRenderer.invoke('set-settings', 'transcription', JSON.parse(JSON.stringify(settings.value)))
+  
+  // Update running services with new credentials immediately
+  if (settings.value.gcpKeyJson) {
+    await window.ipcRenderer.invoke('update-gcp-credentials', settings.value.gcpKeyJson)
+  }
+  
   alert('Settings saved successfully!')
 }
 
