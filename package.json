@@ -6,9 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build && electron-builder",
-    "build:win": "vue-tsc && vite build && electron-builder --win -c.publish=never",
-    "build:mac": "vue-tsc && vite build && electron-builder --mac -c.publish=never",
-    "build:all": "vue-tsc && vite build && electron-builder --win --mac -c.publish=never",
+    "build:win": "vue-tsc && vite build && electron-builder --win --publish never",
+    "build:mac": "vue-tsc && vite build && electron-builder --mac --publish never",
+    "build:all": "vue-tsc && vite build && electron-builder --win --mac --publish never",
     "preview": "vite preview"
   },
   "dependencies": {
