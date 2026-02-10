@@ -275,7 +275,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 
 interface WindowStyle {
   backgroundColor: string
@@ -348,11 +348,9 @@ const getDisplayLabel = (id?: number) => {
   return d ? d.label : 'Unknown Display'
 }
 
-const getAudioDeviceLabel = (id?: string) => {
-  if (!id) return 'Default Mic'
-  const d = audioDevices.value.find(dev => dev.deviceId === id)
-  return d ? d.label : 'Unknown Mic'
-}
+onUnmounted(() => {
+  stopVUMeter()
+})
 
 const loadPresets = async () => {
   const saved = await window.ipcRenderer.invoke('get-project-state') as WindowPreset[]
