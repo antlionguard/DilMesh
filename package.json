@@ -1,14 +1,14 @@
 {
   "name": "dilmesh",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build && electron-builder",
-    "build:win": "vue-tsc && vite build && electron-builder --win --publish never",
-    "build:mac": "vue-tsc && vite build && electron-builder --mac --publish never",
-    "build:all": "vue-tsc && vite build && electron-builder --win --mac --publish never",
+    "build:win": "rm -rf dist-electron && vue-tsc && vite build && electron-builder --win --publish never",
+    "build:mac": "rm -rf dist-electron && vue-tsc && vite build && electron-builder --mac --publish never",
+    "build:all": "rm -rf dist-electron && vue-tsc && vite build && electron-builder --win --mac --publish never",
     "preview": "vite preview"
   },
   "dependencies": {

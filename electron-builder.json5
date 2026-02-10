@@ -3,6 +3,11 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.antlionguard.dilmesh",
   "asar": true,
+  "asarUnpack": [
+    // Unpack binary files that need to be executable
+    "bin/whisper.cpp/build/bin/whisper-stream"
+  ],
+  "compression": "maximum",
   "productName": "DilMesh",
   "directories": {
     "output": "release/${version}"
@@ -10,6 +15,31 @@
   "files": [
     "dist",
     "dist-electron",
+    
+    // CRITICAL: Exclude rules must come BEFORE include rules
+    // First, exclude the entire bin/whisper.cpp directory
+    "!bin/whisper.cpp/**/*",
+    
+    // Node modules optimization - exclude unnecessary files
+    "!node_modules/**/{CHANGELOG.md,README.md,README,readme.md,readme}",
+    "!node_modules/**/{test,__tests__,tests,powered-test,example,examples}",
+    "!node_modules/**/*.d.ts",
+    "!node_modules/.bin",
+    "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
+    "!.editorconfig",
+    "!**/._*",
+    "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
+    "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
+    "!**/{appveyor.yml,.travis.yml,circle.yml}",
+    "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}",
+    
+    // Now include only the essential Whisper runtime files (~5MB total)
+    // Binary for transcription
+    "bin/whisper.cpp/build/bin/whisper-stream",
+    // Download scripts for model management
+    "bin/whisper.cpp/models/download-ggml-model.sh",
+    "bin/whisper.cpp/models/download-ggml-model.cmd",
+    
     "node_modules/**/*"
   ],
   "mac": {

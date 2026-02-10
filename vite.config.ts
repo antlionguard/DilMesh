@@ -13,6 +13,9 @@ export default defineConfig({
         entry: 'electron/main.ts',
         vite: {
           build: {
+            // Disable source maps in production for smaller bundle size
+            sourcemap: false,
+            minify: 'esbuild',
             rollupOptions: {
               // Mark @google-cloud packages as external to avoid ESM bundling issues
               external: [
@@ -39,4 +42,11 @@ export default defineConfig({
         : {},
     }),
   ],
+  build: {
+    // Disable source maps in production for smaller bundle size
+    sourcemap: false,
+    minify: 'esbuild',
+    // Optimize chunk size
+    chunkSizeWarningLimit: 1000,
+  },
 })
