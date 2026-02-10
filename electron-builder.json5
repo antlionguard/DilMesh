@@ -1,7 +1,7 @@
 // @see - https://www.electron.build/configuration/configuration
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
-  "appId": "com.livesubtitle.app",
+  "appId": "com.antlionguard.live-subtitle-app",
   "asar": true,
   "productName": "Live Subtitle App",
   "directories": {

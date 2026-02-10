@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, screen } from 'electron'
 import { setupStoreHandlers, store } from './store'
 import { LocalWhisperService } from './LocalWhisperService'
 import { GcpSpeechService } from './GcpSpeechService'
+import { GcpTranslationService } from './GcpTranslationService'
 // import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -35,14 +36,44 @@ const projectionWindows = new Map<string, BrowserWindow>()
 // Centralized transcription services
 let localWhisperService: LocalWhisperService | null = null
 let gcpSpeechService: GcpSpeechService | null = null
+let gcpTranslationService: GcpTranslationService | null = null
 
-// Helper to broadcast to all projection windows
-function broadcastToProjectionWindows(channel: string, data: any) {
-  projectionWindows.forEach((win) => {
+// Per-window language preferences
+const windowLanguagePreferences = new Map<string, string>() // windowId -> language code ('live', 'en', 'tr', etc.)
+
+// Helper to broadcast to all projection windows with translation support
+async function broadcastToProjectionWindows(channel: string, data: any) {
+  for (const [windowId, win] of projectionWindows.entries()) {
     if (!win.isDestroyed()) {
-      win.webContents.send(channel, data)
+      // Get language preference for this window
+      const language = windowLanguagePreferences.get(windowId) || 'live'
+
+      // If it's a transcript update and translation is needed
+      if (channel === 'transcript-update' && language !== 'live' && data.text) {
+        // Translate the text if translation service is available
+        if (gcpTranslationService && gcpTranslationService.isReady()) {
+          try {
+            const translatedText = await gcpTranslationService.translate(
+              data.text,
+              language
+            )
+            // Send translated version to this window
+            win.webContents.send(channel, { ...data, text: translatedText })
+          } catch (error) {
+            console.error(`Translation failed for window ${windowId}:`, error)
+            // Fallback to original text
+            win.webContents.send(channel, data)
+          }
+        } else {
+          // No translation service, send original
+          win.webContents.send(channel, data)
+        }
+      } else {
+        // No translation needed, send original
+        win.webContents.send(channel, data)
+      }
     }
-  })
+  }
 }
 
 function createMainWindow() {
@@ -133,9 +164,28 @@ app.whenReady().then(() => {
 
   if (!gcpSpeechService) {
     gcpSpeechService = new GcpSpeechService()
+
+    // Setup broadcast listeners for GCP Speech
+    gcpSpeechService.on('transcript', (result) => {
+      console.log('[Main] Broadcasting GCP transcript:', result.text)
+      broadcastToProjectionWindows('transcript-update', result)
+    })
   }
 
-  // Note: GcpSpeechService will broadcast internally in its stream handler
+  if (!gcpTranslationService) {
+    gcpTranslationService = new GcpTranslationService()
+    // Initialize with GCP credentials from settings if available
+    try {
+      const settings: any = store.get('transcription')
+      if (settings?.gcpKeyJson) {
+        gcpTranslationService.initialize(settings.gcpKeyJson)
+      }
+    } catch (error) {
+      console.log('No translation credentials found, translation will be disabled')
+    }
+  }
+
+  // Note: GcpSpeechService will emit transcript events that we listen to above
 
   ipcMain.handle('create-projection-window', (_, id) => {
     if (projectionWindows.has(id)) {
@@ -161,7 +211,7 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('update-projection-settings', (_, { id, ...settings }) => {
+  ipcMain.handle('update-projection-settings', (_, { id, ...settings }: { id: string, [key: string]: any }) => {
     const win = projectionWindows.get(id)
     if (win) {
       win.webContents.send('settings-updated', settings)
@@ -208,6 +258,7 @@ app.whenReady().then(() => {
           click: () => {
             win.close()
             projectionWindows.delete(id)
+            windowLanguagePreferences.delete(id) // Clean up language preference
           }
         }
       ])
@@ -215,30 +266,34 @@ app.whenReady().then(() => {
     })
   })
 
+  // Handler to set window language preference
+  ipcMain.handle('set-window-language', (_, { windowId, language }) => {
+    windowLanguagePreferences.set(windowId, language)
+    console.log(`Window ${windowId} language set to: ${language}`)
+  })
+
+  // Handler to get window language preference
+  ipcMain.handle('get-window-language', (_, { windowId }) => {
+    return windowLanguagePreferences.get(windowId) || 'live'
+  })
+
 
 
   new ModelService() // Initialize handlers
-  const localWhisper = new LocalWhisperService()
-  new GcpSpeechService() // Initialize GCP handlers
 
   ipcMain.handle('start-local-transcription', async (_, { deviceId, language, model }) => {
     const id = parseInt(deviceId, 10) || 0
-    const settings = await store.get('transcription')
-    localWhisper.start(id, language || 'auto', model || 'small', settings)
+    const settings = store.get('transcription')
+    if (localWhisperService) {
+      localWhisperService.start(id, language || 'auto', model || 'small', settings)
+    }
   })
 
   ipcMain.handle('stop-local-transcription', async () => {
-    localWhisper.stop()
-  })
-
-  localWhisper.on('transcription', (text) => {
-    for (const win of projectionWindows.values()) {
-      win.webContents.send('transcript-update', {
-        text,
-        isFinal: false,
-        provider: 'LOCAL'
-      })
+    if (localWhisperService) {
+      localWhisperService.stop()
     }
   })
+
 })
 

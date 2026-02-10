@@ -97,6 +97,10 @@
              <button @click.stop="deletePreset(preset.id)" class="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-red-900/20 transition-colors">
                Delete
              </button>
+
+             <button @click.stop="duplicatePreset(preset)" class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded hover:bg-blue-900/20 transition-colors ml-auto mr-2">
+               Duplicate
+             </button>
              
              <button 
                @click.stop="savePreset(preset)" 
@@ -190,16 +194,39 @@
              <!-- Hardware -->
              <div>
                <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider mb-4">Display Target</h3>
-               <div>
-                 <label class="block text-sm text-gray-400 mb-1">Target Display</label>
-                 <select v-model="selectedPreset.targetDisplayId" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2">
-                   <option :value="undefined">Windowed Mode (Default)</option>
-                   <option v-for="display in displays" :key="display.id" :value="display.id">
-                     {{ display.label }} ({{ display.bounds.width }}x{{ display.bounds.height }})
-                   </option>
-                 </select>
-                 <p class="text-xs text-gray-500 mt-1">If set, opening will force fullscreen on this display.</p>
-                 <p class="text-xs text-gray-400 mt-2">💡 Microphone is now configured globally in Settings.</p>
+               <div class="space-y-4">
+                 <div>
+                   <label class="block text-sm text-gray-400 mb-1">Target Display</label>
+                   <select v-model="selectedPreset.targetDisplayId" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2">
+                     <option :value="undefined">Windowed Mode (Default)</option>
+                     <option v-for="display in displays" :key="display.id" :value="display.id">
+                       {{ display.label }} ({{ display.bounds.width }}x{{ display.bounds.height }})
+                     </option>
+                   </select>
+                   <p class="text-xs text-gray-500 mt-1">If set, opening will force fullscreen on this display.</p>
+                 </div>
+                 
+                 <div>
+                   <label class="block text-sm text-gray-400 mb-1">Display Language</label>
+                   <select v-model="selectedPreset.language" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2">
+                     <option value="live">🎙️ Live Captions (No Translation)</option>
+                     <option value="en">🇬🇧 English</option>
+                     <option value="tr">🇹🇷 Turkish</option>
+                     <option value="es">🇪🇸 Spanish</option>
+                     <option value="fr">🇫🇷 French</option>
+                     <option value="de">🇩🇪 German</option>
+                     <option value="it">🇮🇹 Italian</option>
+                     <option value="pt">🇵🇹 Portuguese</option>
+                     <option value="ru">🇷🇺 Russian</option>
+                     <option value="ja">🇯🇵 Japanese</option>
+                     <option value="ko">🇰🇷 Korean</option>
+                     <option value="zh">🇨🇳 Chinese</option>
+                     <option value="ar">🇸🇦 Arabic</option>
+                   </select>
+                   <p class="text-xs text-gray-500 mt-1">Select 'Live Captions' for original text, or choose a language for real-time translation.</p>
+                 </div>
+                 
+                 <p class="text-xs text-gray-400">💡 Microphone is now configured globally in Settings.</p>
                </div>
              </div>
             
@@ -267,6 +294,7 @@ interface WindowPreset {
   name: string
   audioDeviceId?: string
   targetDisplayId?: number
+  language?: string  // 'live' or language code (en, tr, es, etc.)
   style: WindowStyle
 }
 
@@ -329,13 +357,14 @@ const getAudioDeviceLabel = (id?: string) => {
 const loadPresets = async () => {
   const saved = await window.ipcRenderer.invoke('get-project-state') as WindowPreset[]
   if (saved && saved.length > 0) {
-    // Migrate old presets to include position defaults
+    // Migrate old presets to include position and language defaults
     presets.value = saved.map(p => ({
       ...p,
+      language: p.language ?? 'live',  // Default to live captions
       style: {
         ...p.style,
         positionX: p.style.positionX ?? 50,  // Center by default
-        positionY: p.style.positionY ?? 90   // Bottom by default
+        positionY: p.style.positionY ?? 50   // Center by default
       }
     }))
   }
@@ -349,16 +378,17 @@ const createNewPreset = () => {
   const newPreset: WindowPreset = {
     id: Date.now().toString(),
     name: `Preset ${presets.value.length + 1}`,
+    language: 'live',  // Default to no translation
     style: {
       backgroundColor: '#00FF00',
       textColor: '#FFFFFF',
       fontSize: 48,
       fontFamily: 'Arial',
       textShadow: true,
-      maxLines: 2,
-      justifyContent: 'flex-end',
+      maxLines: 4, // Increased default to prevent cutting off long sentences
+      justifyContent: 'center',
       positionX: 50,  // Center horizontally
-      positionY: 90   // Near bottom
+      positionY: 50   // Center vertically
     }
   }
   presets.value.push(newPreset)
@@ -375,6 +405,18 @@ const deletePreset = async (id: string) => {
     if (selectedPresetId.value === id) selectedPresetId.value = null
     savePresetsToDisk()
   }
+}
+
+const duplicatePreset = (preset: WindowPreset) => {
+  const newPreset: WindowPreset = {
+    ...JSON.parse(JSON.stringify(preset)), // Deep copy to avoid reference issues
+    id: Date.now().toString(),
+    name: `${preset.name} (Copy)`
+  }
+  presets.value.push(newPreset)
+  // Select the new duplicate
+  selectedPresetId.value = newPreset.id
+  savePresetsToDisk()
 }
 
 const savePreset = async (_preset: WindowPreset) => {
@@ -421,6 +463,12 @@ const openWindow = async (preset: WindowPreset) => {
   try {
     await window.ipcRenderer.invoke('create-projection-window', preset.id)
     activeWindows.value.add(preset.id)
+    
+    // Set language preference for this window
+    await window.ipcRenderer.invoke('set-window-language', {
+      windowId: preset.id,
+      language: preset.language || 'live'
+    })
     
     // Position window if display target is set
     if (preset.targetDisplayId) {

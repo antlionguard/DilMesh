@@ -1,9 +1,10 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain } from 'electron'
 import { SpeechClient, protos } from '@google-cloud/speech'
+import { EventEmitter } from 'events'
 
 type IRecognitionConfig = protos.google.cloud.speech.v1.IRecognitionConfig
 
-export class GcpSpeechService {
+export class GcpSpeechService extends EventEmitter {
     private client: SpeechClient | null = null
     private recognizeStream: any = null
     private isRunning: boolean = false
@@ -21,6 +22,7 @@ export class GcpSpeechService {
     private restartTimeout: NodeJS.Timeout | null = null
 
     constructor() {
+        super()
         this.setupHandlers()
     }
 
@@ -121,16 +123,11 @@ export class GcpSpeechService {
                     const result = response.results[0]
                     if (result.alternatives && result.alternatives.length > 0) {
                         const transcript = result.alternatives[0].transcript
-                        // Broadcast to projection windows only
-                        BrowserWindow.getAllWindows().forEach(win => {
-                            // Only send to projection windows (not main dashboard)
-                            if (win.getTitle && win.getTitle().length > 0 && !win.getTitle().includes('Dashboard')) {
-                                win.webContents.send('transcript-update', {
-                                    provider: 'GCP',
-                                    text: transcript || '',
-                                    isFinal: result.isFinal || false
-                                })
-                            }
+                        // Emit transcript event for main process to handle broadcasting
+                        this.emit('transcript', {
+                            provider: 'GCP',
+                            text: transcript || '',
+                            isFinal: result.isFinal || false
                         })
                     }
                 }

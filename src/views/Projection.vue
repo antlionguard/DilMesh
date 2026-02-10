@@ -26,9 +26,9 @@ const style = ref({
   fontFamily: 'Arial',
   textShadow: true,
   maxLines: 2,
-  justifyContent: 'flex-end',
+  justifyContent: 'center',
   positionX: 50,  // Center by default
-  positionY: 90   // Near bottom by default
+  positionY: 50   // Center by default
 })
 
 const props = defineProps<{ id: string }>()
@@ -54,10 +54,14 @@ const textStyle = computed((): CSSProperties => ({
   fontFamily: style.value.fontFamily,
   textShadow: style.value.textShadow ? '2px 2px 4px rgba(0,0,0,0.8)' : 'none',
   lineHeight: '1.2',
-  display: '-webkit-box',
-  WebkitLineClamp: style.value.maxLines > 0 ? style.value.maxLines : 'unset',
-  WebkitBoxOrient: 'vertical',
-  overflow: 'hidden'
+  display: 'flex',
+  flexDirection: 'column',
+  justifyContent: 'flex-end',
+  maxHeight: style.value.maxLines > 0 ? `${style.value.fontSize * 1.2 * style.value.maxLines}px` : 'unset',
+  overflow: 'hidden',
+  overflowWrap: 'break-word',
+  wordBreak: 'break-word',
+  whiteSpace: 'pre-wrap'
 } as CSSProperties))
 
 
