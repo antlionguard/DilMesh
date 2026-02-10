@@ -127,8 +127,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            ./artifacts/windows/*.exe
-            ./artifacts/macos/*.dmg
+            ./artifacts/windows/**/*.exe
+            ./artifacts/macos/**/*.dmg
           draft: false
           prerelease: false
           generate_release_notes: true
