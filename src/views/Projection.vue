@@ -32,7 +32,7 @@ const style = ref({
   positionY: 50   // Center by default
 })
 
-const props = defineProps<{ id: string }>()
+defineProps<{ id: string }>()
 
 
 
