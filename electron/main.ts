@@ -42,6 +42,7 @@ let gcpTranslationService: GcpTranslationService | null = null
 // Per-window language preferences
 const windowLanguagePreferences = new Map<string, string>() // windowId -> language code ('live', 'en', 'tr', etc.)
 
+
 // Helper to broadcast to all projection windows with translation support
 async function broadcastToProjectionWindows(channel: string, data: any) {
   for (const [windowId, win] of projectionWindows.entries()) {
@@ -50,7 +51,7 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
       const language = windowLanguagePreferences.get(windowId) || 'live'
 
       // If it's a transcript update and translation is needed
-      if (channel === 'transcript-update' && language !== 'live' && data.text) {
+      if (channel === 'transcript-update' && language !== 'live' && data.text && data.isSentence) {
         // Skip if source matches target (e.g., tr -> tr-TR)
         const sourceLang = (data.detectedLanguage || '').split('-')[0]
         const targetLang = language.split('-')[0]
@@ -83,9 +84,23 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
           win.webContents.send(channel, data)
         }
       } else {
-        // No translation needed, send original
+        // No translation needed (interim or 'live' mode), send original
         win.webContents.send(channel, data)
       }
+    }
+  }
+}
+
+// Broadcast interim (live) transcripts — only to windows in 'live' mode
+function broadcastLiveCaption(data: any) {
+  for (const [windowId, win] of projectionWindows.entries()) {
+    if (!win.isDestroyed()) {
+      const language = windowLanguagePreferences.get(windowId) || 'live'
+      if (language === 'live') {
+        win.webContents.send('transcript-update', data)
+      }
+      // Translation windows intentionally skip live captions to avoid
+      // showing raw source-language text before the translation arrives.
     }
   }
 }
@@ -241,10 +256,77 @@ app.whenReady().then(() => {
   if (!gcpSpeechService) {
     gcpSpeechService = new GcpSpeechService()
 
-    // Setup broadcast listeners for GCP Speech
+    // ── Interim punctuation tracker ─────────────────────────────────────────────
+    let translatedCharCount = 0
+    let lastInterimLanguage = ''   // reset char count when language flips
+    let sentenceSeq = 0            // monotonic sequence number for queue ordering
+    const PUNCT_RE = /[.!?…;,]/g
+    const MIN_CLAUSE_LENGTH = 5    // ignore tiny fragments like "yeah,"
+
+    function findLastPunctIndex(text: string, afterPos: number): number {
+      let lastIdx = -1
+      PUNCT_RE.lastIndex = 0
+      let m: RegExpExecArray | null
+      while ((m = PUNCT_RE.exec(text)) !== null) {
+        if (m.index >= afterPos) lastIdx = m.index
+      }
+      return lastIdx
+    }
+
     gcpSpeechService.on('transcript', (result) => {
-      console.log('[Main] Broadcasting GCP transcript:', result.text)
-      broadcastToProjectionWindows('transcript-update', result)
+      if (!result.isFinal) {
+        // Send live captions to 'live' windows
+        broadcastLiveCaption({ ...result, isSentence: false })
+
+        // Reset char counter if language flipped (different stream won)
+        const lang = result.detectedLanguage || ''
+        if (lang !== lastInterimLanguage) {
+          if (lastInterimLanguage) {
+            console.log(`[Main] Language flip ${lastInterimLanguage} → ${lang}, resetting char counter`)
+          }
+          translatedCharCount = 0
+          lastInterimLanguage = lang
+        }
+
+        // Check for new punctuation in growing interim text
+        const text = result.text || ''
+        const punctIdx = findLastPunctIndex(text, translatedCharCount)
+
+        if (punctIdx >= 0) {
+          const clause = text.substring(translatedCharCount, punctIdx + 1).trim()
+          if (clause.length >= MIN_CLAUSE_LENGTH) {
+            translatedCharCount = punctIdx + 1
+            const seq = ++sentenceSeq
+            console.log(`[Main] Interim punct → translating (${lang}) [seq=${seq}]: "${clause}"`)
+            void broadcastToProjectionWindows('transcript-update', {
+              provider: 'GCP',
+              text: clause,
+              isFinal: false,
+              confidence: result.confidence,
+              detectedLanguage: lang,
+              isSentence: true,
+              seq
+            })
+          }
+        }
+        return
+      }
+
+      // Final result: flush any remaining untranslated suffix
+      const finalText = (result.text || '').trim()
+      const remaining = finalText.substring(translatedCharCount).trim()
+      translatedCharCount = 0  // reset for next utterance
+
+      if (remaining.length > 0) {
+        const seq = ++sentenceSeq
+        console.log(`[Main] Final flush remaining [seq=${seq}]: "${remaining}"`)
+        void broadcastToProjectionWindows('transcript-update', {
+          ...result,
+          text: remaining,
+          isSentence: true,
+          seq
+        })
+      }
     })
   }
 
@@ -354,6 +436,11 @@ app.whenReady().then(() => {
   ipcMain.handle('set-window-language', (_, { windowId, language }) => {
     windowLanguagePreferences.set(windowId, language)
     console.log(`Window ${windowId} language set to: ${language}`)
+    // Notify the window itself so Projection.vue can update its display mode
+    const win = projectionWindows.get(windowId)
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('language-mode-updated', { language })
+    }
   })
 
   // Handler to get window language preference

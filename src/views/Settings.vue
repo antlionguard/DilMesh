@@ -271,7 +271,7 @@
               </ul>
             </div>
 
-            <!-- Translation Model Selection -->
+             <!-- Translation Model Selection -->
             <div>
                <label class="block text-sm text-gray-400 mb-1">Translation Edition</label>
                <select v-model="settings.gcpTranslationModel" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2">
@@ -279,6 +279,30 @@
                  <option value="v3" disabled>✨ Advanced (V3) — Paid Only (Coming Soon)</option>
                </select>
                <p class="text-xs text-gray-500 mt-1">Currently using Basic edition which supports the monthly free tier.</p>
+            </div>
+
+            <!-- Subtitle Queue Max Depth -->
+            <div>
+              <label class="block text-sm text-gray-400 mb-1">Subtitle Queue Max Depth: {{ settings.subtitleQueueMaxDepth === 0 ? 'Unlimited' : settings.subtitleQueueMaxDepth }}</label>
+              <div class="flex items-center gap-4">
+                <input type="range" v-model.number="settings.subtitleQueueMaxDepth" min="0" max="10" step="1" class="flex-1" />
+                <input type="number" v-model.number="settings.subtitleQueueMaxDepth" min="0" max="10" step="1" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-center text-sm" />
+              </div>
+              <p class="text-xs text-blue-400 mt-1">
+                Max number of translated sentences waiting to be displayed. <strong>0 = Unlimited</strong> (keep all context — good for lectures). Positive values drop the oldest pending sentence when the queue fills up, keeping the display closer to real-time.
+              </p>
+            </div>
+
+            <!-- Subtitle Reading Speed (CPS) -->
+            <div>
+              <label class="block text-sm text-gray-400 mb-1">Reading Speed (CPS): {{ settings.subtitleCPS }}</label>
+              <div class="flex items-center gap-4">
+                <input type="range" v-model.number="settings.subtitleCPS" min="5" max="30" step="1" class="flex-1" />
+                <input type="number" v-model.number="settings.subtitleCPS" min="5" max="30" step="1" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-center text-sm" />
+              </div>
+              <p class="text-xs text-blue-400 mt-1">
+                Characters Per Second — how long each translated subtitle stays on screen. <strong>Lower = longer display</strong> (good for slower readers). Netflix standard is 17. Range: 5 (very slow) to 30 (very fast).
+              </p>
             </div>
 
             <!-- Service Account Key -->
@@ -326,6 +350,8 @@ const settings = ref({
   gcpMaxAlternatives: 1,
   gcpConfidenceThreshold: 0.85,
   gcpMinWordBuffer: 3,
+  subtitleQueueMaxDepth: 0,  // 0 = unlimited
+  subtitleCPS: 17,            // Netflix standard
   language: 'auto',
   model: 'small',
   audioDeviceId: undefined as string | undefined,

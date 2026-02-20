@@ -40,6 +40,12 @@ export class GcpSpeechService extends EventEmitter {
     private interimDebounceTimer: NodeJS.Timeout | null = null
     private pendingInterimResults: Map<string, LanguageResult> = new Map()
 
+    // Interim stability gate (suppress one-shot hallucinations)
+    private lastInterimText: string = ''
+    private interimStabilityCount: number = 0
+    private readonly STABILITY_THRESHOLD = 0.4  // min word-overlap ratio between two consecutive interims
+    private readonly STABILITY_REPEAT = 2        // must be stable for this many consecutive rounds
+
     // Language code mapping
     private static readonly LANGUAGE_MAP: Record<string, string> = {
         'auto': 'en-US',
@@ -260,6 +266,10 @@ export class GcpSpeechService extends EventEmitter {
         }
         this.pendingInterimResults.clear()
 
+        // Reset stability state so the next interim starts fresh
+        this.lastInterimText = ''
+        this.interimStabilityCount = 0
+
         // Update state
         this.dominantLanguage = result.language
         this.lastResultTime = now
@@ -329,17 +339,34 @@ export class GcpSpeechService extends EventEmitter {
             }
 
             // Apply word buffer filter for interim results
-            // Count words in the text (split by whitespace)
             const wordCount = best.text.trim().split(/\s+/).filter(w => w.length > 0).length
-
             if (this.currentMinWordBuffer > 0 && wordCount < this.currentMinWordBuffer) {
                 // console.log(`[GCP Parallel] Buffering interim (${wordCount} words < ${this.currentMinWordBuffer} minimum)`)
                 this.pendingInterimResults.clear()
                 return
             }
 
-            // Update state (keep locking to this language if it keeps winning)
-            // Only update active language if we have some reasonable confidence or it's already set
+            // ── Stability Gate ────────────────────────────────────────────────────
+            // Compare this interim to the previous one. If word-overlap is below
+            // the threshold the text changed too drastically (likely a hallucination
+            // or a wild re-recognition). We require it to be stable for
+            // STABILITY_REPEAT consecutive rounds before we show it.
+            const overlap = this.calcOverlap(this.lastInterimText, best.text)
+            if (overlap >= this.STABILITY_THRESHOLD) {
+                this.interimStabilityCount++
+            } else {
+                this.interimStabilityCount = 0
+                console.log(`[GCP Stability] ⚠️  Unstable interim (overlap: ${overlap.toFixed(2)}), suppressing: "${best.text.substring(0, 40)}"`)
+            }
+            this.lastInterimText = best.text
+
+            if (this.interimStabilityCount < this.STABILITY_REPEAT) {
+                this.pendingInterimResults.clear()
+                return  // Not yet stable — withhold from display
+            }
+            // ─────────────────────────────────────────────────────────────────────
+
+            // Update dominant language state
             if (bestScore > 0.2 || this.dominantLanguage) {
                 this.dominantLanguage = best.language
                 this.lastResultTime = now
@@ -355,6 +382,23 @@ export class GcpSpeechService extends EventEmitter {
         }
 
         this.pendingInterimResults.clear()
+    }
+
+    /**
+     * Calculates the word-level Jaccard overlap between two transcript strings.
+     * Returns a value in [0, 1]. Used by the stability gate to detect
+     * hallucinations / wild re-recognitions between consecutive interim results.
+     */
+    private calcOverlap(a: string, b: string): number {
+        const wordsA = new Set(a.toLowerCase().split(/\s+/).filter(Boolean))
+        const wordsB = new Set(b.toLowerCase().split(/\s+/).filter(Boolean))
+        if (wordsA.size === 0 && wordsB.size === 0) return 1  // both empty → identical
+        if (wordsA.size === 0 || wordsB.size === 0) return 0  // one empty → no overlap
+        let common = 0
+        for (const w of wordsB) {
+            if (wordsA.has(w)) common++
+        }
+        return common / Math.max(wordsA.size, wordsB.size)
     }
 
     private scheduleRestart(language: string): void {

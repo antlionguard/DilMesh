@@ -28,13 +28,11 @@ const style = ref({
   textShadow: true,
   maxLines: 2,
   justifyContent: 'center',
-  positionX: 50,  // Center by default
-  positionY: 50   // Center by default
+  positionX: 50,
+  positionY: 50
 })
 
 defineProps<{ id: string }>()
-
-
 
 import { CSSProperties } from 'vue'
 
@@ -42,7 +40,9 @@ const positionStyle = computed((): CSSProperties => ({
   left: `${style.value.positionX}%`,
   top: `${style.value.positionY}%`,
   transform: 'translate(-50%, -50%)',
-  maxWidth: '90vw',
+  width: '100vw',
+  padding: '0 2vw',
+  boxSizing: 'border-box',
   zIndex: 1000
 }))
 
@@ -65,14 +65,147 @@ const textStyle = computed((): CSSProperties => ({
 
 
 onMounted(async () => {
-  // Set initial title from query param
   if (route.query.title) {
     document.title = `${route.query.title} - DilMesh`
   }
 
-  // Listen for transcript updates from main process (centralized)
+  // ── CPS Queue Player ────────────────────────────────────────────────────────
+  // Translated sentences are queued and shown one at a time. Display duration
+  // is calculated from character count using the Netflix-standard 17 CPS rate.
+  // Live-caption windows skip the queue and show captions in real time.
+  // ────────────────────────────────────────────────────────────────────────────
+
+  let cps = 17               // Characters Per Second (default: Netflix standard)
+  const MIN_DISPLAY_MS = 1500
+  const MAX_DISPLAY_MS = 7000
+  const INACTIVITY_CLEAR_MS = 10_000
+
+  // Load settings on mount
+  let queueMaxDepth = 0
+  try {
+    const s = await window.ipcRenderer.invoke('get-settings', 'transcription')
+    if (s && typeof s.subtitleQueueMaxDepth === 'number') {
+      queueMaxDepth = s.subtitleQueueMaxDepth
+    }
+    if (s && typeof s.subtitleCPS === 'number') {
+      cps = s.subtitleCPS
+    }
+  } catch { /* settings not available yet, fall back to defaults */ }
+
+  const sentenceQueue: { text: string, seq: number }[] = []
+  let displayTimer: ReturnType<typeof setTimeout> | null = null
+  let inactivityTimer: ReturnType<typeof setTimeout> | null = null
+  let isDisplaying = false
+  let isTranslationMode = false
+
+  // Query this window's language preference on mount (the language-mode-updated
+  // event may have fired before this component mounted, so we need to check)
+  try {
+    const windowId = route.params.id as string
+    if (windowId) {
+      const lang = await window.ipcRenderer.invoke('get-window-language', { windowId })
+      if (lang && lang !== 'live') {
+        isTranslationMode = true
+        currentText.value = ''  // clear "Waiting for subtitles..." placeholder
+        console.log(`[Projection] Initialized in translation mode (${lang})`)
+      }
+    }
+  } catch { /* fallback to live mode */ }
+
+  // Hold timer for live mode (keeps translated sentences on screen briefly)
+  let holdUntil = 0
+
+  function calcHoldMs(text: string): number {
+    return Math.min(Math.max((text.length / cps) * 1000, MIN_DISPLAY_MS), MAX_DISPLAY_MS)
+  }
+
+  function resetInactivityTimer() {
+    if (inactivityTimer) clearTimeout(inactivityTimer)
+    inactivityTimer = setTimeout(() => {
+      currentText.value = ''
+      isDisplaying = false
+    }, INACTIVITY_CLEAR_MS)
+  }
+
+  function showNextFromQueue() {
+    if (sentenceQueue.length === 0) {
+      isDisplaying = false
+      resetInactivityTimer()
+      return
+    }
+    const entry = sentenceQueue.shift()!
+    currentText.value = entry.text
+    const holdMs = calcHoldMs(entry.text)
+    console.log(`[Projection] Showing [seq=${entry.seq}] for ${holdMs}ms: "${entry.text.substring(0, 40)}..."`)
+    displayTimer = setTimeout(showNextFromQueue, holdMs)
+  }
+
+  // Insert into queue maintaining seq order (handles async translation race)
+  function insertOrdered(text: string, seq: number) {
+    const entry = { text, seq }
+    // Fast path: seq is higher than everything — just append
+    if (sentenceQueue.length === 0 || seq > sentenceQueue[sentenceQueue.length - 1].seq) {
+      sentenceQueue.push(entry)
+    } else {
+      // Find correct position via binary search
+      let lo = 0, hi = sentenceQueue.length
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        if (sentenceQueue[mid].seq < seq) lo = mid + 1
+        else hi = mid
+      }
+      sentenceQueue.splice(lo, 0, entry)
+    }
+  }
+
+  // Listen for transcript updates from main process
   window.ipcRenderer.on('transcript-update', (_event, result: any) => {
-    currentText.value = result.text
+    const now = Date.now()
+
+    if (result.isSentence) {
+      // ── Translated / final sentence ─────────────────────────────────────────
+      if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null }
+
+      if (isTranslationMode) {
+        // Queue mode: insert at correct seq position
+        if (queueMaxDepth > 0 && sentenceQueue.length >= queueMaxDepth) {
+          console.warn(`[Subtitle Queue] Max depth (${queueMaxDepth}) reached, dropping oldest sentence`)
+          sentenceQueue.shift()
+        }
+        insertOrdered(result.text, result.seq ?? Date.now())
+        if (!isDisplaying) {
+          isDisplaying = true
+          showNextFromQueue()
+        }
+      } else {
+        // Live mode: show immediately with a hold
+        currentText.value = result.text
+        holdUntil = now + calcHoldMs(result.text)
+        resetInactivityTimer()
+      }
+    } else {
+      // ── Interim / live caption ──────────────────────────────────────────────
+      // Translation windows don't receive these (filtered in main.ts).
+      // For live windows, show if not inside a sentence hold window.
+      if (!isTranslationMode && now >= holdUntil) {
+        currentText.value = result.text
+      }
+    }
+  })
+
+  // Listen for language mode changes from main process
+  window.ipcRenderer.on('language-mode-updated', (_event, { language }: { language: string }) => {
+    const wasTranslation = isTranslationMode
+    isTranslationMode = language !== 'live'
+
+    if (wasTranslation !== isTranslationMode) {
+      // Clear queue and display when switching modes
+      sentenceQueue.length = 0
+      if (displayTimer) { clearTimeout(displayTimer); displayTimer = null }
+      isDisplaying = false
+      holdUntil = 0
+      currentText.value = ''
+    }
   })
 
   // Listen for style updates
@@ -83,15 +216,23 @@ onMounted(async () => {
     if (settings.title) {
       document.title = `${settings.title} - DilMesh`
     }
+    // Update queue depth and CPS live if settings change
+    if (typeof settings.subtitleQueueMaxDepth === 'number') {
+      queueMaxDepth = settings.subtitleQueueMaxDepth
+    }
+    if (typeof settings.subtitleCPS === 'number') {
+      cps = settings.subtitleCPS
+    }
   })
 })
 
 onUnmounted(() => {
-  // Cleanup IPC listeners
   window.ipcRenderer.removeAllListeners('transcript-update')
   window.ipcRenderer.removeAllListeners('settings-updated')
+  window.ipcRenderer.removeAllListeners('language-mode-updated')
 })
 </script>
+
 
 <style>
 /* Reset default styles for this window to let user control everything */
