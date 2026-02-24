@@ -17,12 +17,22 @@ export default defineConfig({
             sourcemap: false,
             minify: 'esbuild',
             rollupOptions: {
-              // Mark @google-cloud packages as external to avoid ESM bundling issues
+              // Mark native/dynamic-require packages as external to avoid ESM bundling issues
               external: [
                 '@google-cloud/speech',
                 'google-gax',
                 'google-auth-library',
-                'protobufjs'
+                'protobufjs',
+                // Native modules (Silero VAD, Vosk, NLLB)
+                'onnxruntime-node',
+                'avr-vad',
+                'vosk',
+                'ffi-napi',
+                'ref-napi',
+                '@huggingface/transformers',
+                // Riva gRPC
+                '@grpc/grpc-js',
+                '@grpc/proto-loader',
               ]
             }
           }

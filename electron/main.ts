@@ -3,6 +3,10 @@ import { setupStoreHandlers, store } from './store'
 import { LocalWhisperService } from './LocalWhisperService'
 import { GcpSpeechService } from './GcpSpeechService'
 import { GcpTranslationService } from './GcpTranslationService'
+import { SileroVadService } from './SileroVadService'
+import { SherpaOnnxSpeechService } from './SherpaOnnxSpeechService'
+import { RivaSpeechService } from './RivaSpeechService'
+import { NllbTranslationService } from './NllbTranslationService'
 // import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -38,6 +42,10 @@ let tray: Tray | null = null
 let localWhisperService: LocalWhisperService | null = null
 let gcpSpeechService: GcpSpeechService | null = null
 let gcpTranslationService: GcpTranslationService | null = null
+let sileroVad: SileroVadService | null = null
+let sherpaOnnxService: SherpaOnnxSpeechService | null = null
+let rivaSpeechService: RivaSpeechService | null = null
+let nllbTranslationService: NllbTranslationService | null = null
 
 // Per-window language preferences
 const windowLanguagePreferences = new Map<string, string>() // windowId -> language code ('live', 'en', 'tr', etc.)
@@ -260,8 +268,41 @@ app.whenReady().then(() => {
     })
   }
 
+  // Initialize Silero VAD
+  if (!sileroVad) {
+    sileroVad = new SileroVadService()
+    // Try to initialize with settings
+    try {
+      const settings: any = store.get('transcription')
+      const vadEnabled = settings?.vadEnabled ?? true
+      sileroVad.initialize({
+        enabled: vadEnabled,
+        positiveSpeechThreshold: settings?.vadThreshold ?? 0.5,
+        negativeSpeechThreshold: settings?.vadNegativeThreshold ?? 0.35,
+        preSpeechPadFrames: settings?.vadPreSpeechPad ?? 1,
+        redemptionFrames: settings?.vadRedemptionFrames ?? 8,
+        minSpeechFrames: settings?.vadMinSpeechFrames ?? 3
+      })
+    } catch (error) {
+      console.log('[Main] VAD initialization deferred, will passthrough audio')
+    }
+  }
+
   if (!gcpSpeechService) {
     gcpSpeechService = new GcpSpeechService()
+
+    // Wire VAD as audio preprocessor for GCP
+    // Audio flow: mic → GCP IPC handler → VAD.processAudio → audio-for-stt → writeAudio
+    if (sileroVad) {
+      gcpSpeechService.audioPreprocessor = (chunk: Buffer) => {
+        sileroVad!.processAudio(chunk)
+      }
+      sileroVad.on('audio-for-stt', (audioChunk: Buffer) => {
+        if (gcpSpeechService) {
+          gcpSpeechService.writeAudio(audioChunk)
+        }
+      })
+    }
 
     // ── Interim punctuation tracker ─────────────────────────────────────────────
     let translatedCharCount = 0
@@ -351,6 +392,87 @@ app.whenReady().then(() => {
   }
 
   // Note: GcpSpeechService will emit transcript events that we listen to above
+
+  // ── Initialize Sherpa-ONNX STT ──────────────────────────────────────────
+  if (!sherpaOnnxService) {
+    sherpaOnnxService = new SherpaOnnxSpeechService()
+
+    // Wire VAD as audio preprocessor for Sherpa-ONNX
+    if (sileroVad) {
+      sherpaOnnxService.audioPreprocessor = (chunk: Buffer) => {
+        sileroVad!.processAudio(chunk)
+      }
+      sileroVad.on('audio-for-stt', (audioChunk: Buffer) => {
+        if (sherpaOnnxService) {
+          sherpaOnnxService.writeAudio(audioChunk)
+        }
+      })
+    }
+
+    // Sherpa-ONNX transcript events → same pipeline as GCP
+    sherpaOnnxService.on('transcript', (result: any) => {
+      broadcastToProjectionWindows('transcription-result', {
+        text: result.text,
+        isFinal: result.isFinal,
+        language: result.language,
+        provider: 'SHERPA_ONNX',
+        confidence: result.confidence
+      })
+    })
+
+    sherpaOnnxService.on('error', (error) => {
+      console.error('[Main] Sherpa-ONNX error:', error)
+    })
+  }
+
+  // ── Initialize Riva STT + NMT ───────────────────────────────────────────
+  if (!rivaSpeechService) {
+    rivaSpeechService = new RivaSpeechService()
+
+    // Wire VAD as audio preprocessor for Riva
+    if (sileroVad) {
+      rivaSpeechService.audioPreprocessor = (chunk: Buffer) => {
+        sileroVad!.processAudio(chunk)
+      }
+      sileroVad.on('audio-for-stt', (audioChunk: Buffer) => {
+        if (rivaSpeechService) {
+          rivaSpeechService.writeAudio(audioChunk)
+        }
+      })
+    }
+
+    // Riva transcript events → same pipeline as GCP/Sherpa
+    rivaSpeechService.on('transcript', (result: any) => {
+      broadcastToProjectionWindows('transcription-result', {
+        text: result.text,
+        isFinal: result.isFinal,
+        language: result.language,
+        provider: 'RIVA',
+        confidence: result.confidence
+      })
+    })
+
+    rivaSpeechService.on('error', (error) => {
+      console.error('[Main] Riva error:', error)
+    })
+  }
+
+  // ── Initialize NLLB Translation ──────────────────────────────────────────
+  if (!nllbTranslationService) {
+    nllbTranslationService = new NllbTranslationService()
+
+    // Initialize NLLB on demand via IPC
+    ipcMain.handle('initialize-nllb', async () => {
+      return nllbTranslationService?.initialize()
+    })
+
+    ipcMain.handle('nllb-translate', async (_, text: string, targetLang: string, sourceLang?: string) => {
+      if (!nllbTranslationService?.isReady()) {
+        throw new Error('NLLB model not loaded')
+      }
+      return nllbTranslationService.translate(text, targetLang, sourceLang)
+    })
+  }
 
   ipcMain.handle('create-projection-window', (_, args: any) => {
     // Handle both old (string ID) and new (object) formats for backward compatibility

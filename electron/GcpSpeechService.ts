@@ -23,6 +23,9 @@ export class GcpSpeechService extends EventEmitter {
     private languageStreams: Map<string, LanguageStream> = new Map()
     private isRunning: boolean = false
 
+    // Optional audio preprocessor (e.g., VAD) — set by main.ts
+    public audioPreprocessor: ((chunk: Buffer) => void) | null = null
+
     // Store config for auto-restart
     private currentGcpKeyJson: string = ''
     private currentLanguages: string[] = ['en-US']
@@ -71,8 +74,14 @@ export class GcpSpeechService extends EventEmitter {
         })
 
         // Handler for receiving audio chunks from renderer
+        // Routes through audioPreprocessor (VAD) if set, otherwise direct
         ipcMain.on('gcp-audio-chunk', (_, audioData: ArrayBuffer) => {
-            this.writeAudio(Buffer.from(audioData))
+            const buffer = Buffer.from(audioData)
+            if (this.audioPreprocessor) {
+                this.audioPreprocessor(buffer)
+            } else {
+                this.writeAudio(buffer)
+            }
         })
     }
 

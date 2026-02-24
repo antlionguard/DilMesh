@@ -1,0 +1,7 @@
+onlyBuiltDependencies:
+  - electron
+  - esbuild
+  - ffi-napi
+  - onnxruntime-node
+  - protobufjs
+  - ref-napi
