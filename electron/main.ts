@@ -49,9 +49,16 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
     if (!win.isDestroyed()) {
       // Get language preference for this window
       const language = windowLanguagePreferences.get(windowId) || 'live'
+      const isTranslationWindow = language !== 'live'
+
+      // Translation windows: ONLY accept sentence-level events — never interim.
+      // This guarantees words don't flicker in real-time on translation projections.
+      if (channel === 'transcript-update' && isTranslationWindow && !data.isSentence) {
+        continue  // drop interim for translation windows
+      }
 
       // If it's a transcript update and translation is needed
-      if (channel === 'transcript-update' && language !== 'live' && data.text && data.isSentence) {
+      if (channel === 'transcript-update' && isTranslationWindow && data.text && data.isSentence) {
         // Skip if source matches target (e.g., tr -> tr-TR)
         const sourceLang = (data.detectedLanguage || '').split('-')[0]
         const targetLang = language.split('-')[0]
@@ -84,7 +91,7 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
           win.webContents.send(channel, data)
         }
       } else {
-        // No translation needed (interim or 'live' mode), send original
+        // Live window or non-transcript channel — send as-is
         win.webContents.send(channel, data)
       }
     }

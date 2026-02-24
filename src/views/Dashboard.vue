@@ -545,7 +545,10 @@ const toggleTranscription = async () => {
         gcpAutoPunctuation: settings?.gcpAutoPunctuation ?? true,
         gcpUseEnhanced: settings?.gcpUseEnhanced ?? false,
         gcpSingleUtterance: settings?.gcpSingleUtterance ?? false,
-        gcpMaxAlternatives: settings?.gcpMaxAlternatives ?? 1
+        gcpMaxAlternatives: settings?.gcpMaxAlternatives ?? 1,
+        gcpConfidenceThreshold: settings?.gcpConfidenceThreshold ?? 0.85,
+        gcpMinWordBuffer: settings?.gcpMinWordBuffer ?? 3,
+        gcpProfanityFilter: settings?.gcpProfanityFilter ?? false
       })
       // Start audio capture and streaming
       await startGcpAudioCapture()

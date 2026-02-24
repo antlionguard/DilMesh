@@ -256,6 +256,12 @@
                 <span class="text-sm text-gray-300">Single Utterance</span>
               </label>
               <p class="text-xs text-gray-500 col-span-2 -mt-2">Stop after first speech pause</p>
+
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" v-model="settings.gcpProfanityFilter" class="w-4 h-4 rounded border-gray-600" />
+                <span class="text-sm text-gray-300">🚫 Profanity Filter</span>
+              </label>
+              <p class="text-xs text-red-400 col-span-2 -mt-2">Completely removes profane words — they won't appear in captions or be sent to translation.</p>
             </div>
 
             <hr class="border-gray-700 my-4" />
@@ -350,6 +356,7 @@ const settings = ref({
   gcpMaxAlternatives: 1,
   gcpConfidenceThreshold: 0.85,
   gcpMinWordBuffer: 3,
+  gcpProfanityFilter: false,
   subtitleQueueMaxDepth: 0,  // 0 = unlimited
   subtitleCPS: 17,            // Netflix standard
   language: 'auto',

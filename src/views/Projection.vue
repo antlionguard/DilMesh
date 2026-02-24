@@ -112,8 +112,7 @@ onMounted(async () => {
     }
   } catch { /* fallback to live mode */ }
 
-  // Hold timer for live mode (keeps translated sentences on screen briefly)
-  let holdUntil = 0
+  // Hold timer for live mode is now handled via the queue — holdUntil removed.
 
   function calcHoldMs(text: string): number {
     return Math.min(Math.max((text.length / cps) * 1000, MIN_DISPLAY_MS), MAX_DISPLAY_MS)
@@ -160,34 +159,29 @@ onMounted(async () => {
 
   // Listen for transcript updates from main process
   window.ipcRenderer.on('transcript-update', (_event, result: any) => {
-    const now = Date.now()
 
     if (result.isSentence) {
-      // ── Translated / final sentence ─────────────────────────────────────────
+      // ── Sentence (translated or punctuation-triggered) ───────────────────────
+      // Both translation mode and live mode use the same queue+CPS timer so that
+      // a sentence is never shown before the previous one's hold time has elapsed.
       if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null }
 
-      if (isTranslationMode) {
-        // Queue mode: insert at correct seq position
-        if (queueMaxDepth > 0 && sentenceQueue.length >= queueMaxDepth) {
-          console.warn(`[Subtitle Queue] Max depth (${queueMaxDepth}) reached, dropping oldest sentence`)
-          sentenceQueue.shift()
-        }
-        insertOrdered(result.text, result.seq ?? Date.now())
-        if (!isDisplaying) {
-          isDisplaying = true
-          showNextFromQueue()
-        }
-      } else {
-        // Live mode: show immediately with a hold
-        currentText.value = result.text
-        holdUntil = now + calcHoldMs(result.text)
-        resetInactivityTimer()
+      if (isTranslationMode && queueMaxDepth > 0 && sentenceQueue.length >= queueMaxDepth) {
+        console.warn(`[Subtitle Queue] Max depth (${queueMaxDepth}) reached, dropping oldest sentence`)
+        sentenceQueue.shift()
+      }
+
+      insertOrdered(result.text, result.seq ?? Date.now())
+
+      if (!isDisplaying) {
+        isDisplaying = true
+        showNextFromQueue()
       }
     } else {
       // ── Interim / live caption ──────────────────────────────────────────────
-      // Translation windows don't receive these (filtered in main.ts).
-      // For live windows, show if not inside a sentence hold window.
-      if (!isTranslationMode && now >= holdUntil) {
+      // Translation windows never reach here (blocked upstream in main.ts).
+      // Live caption windows always show interim in real time.
+      if (!isTranslationMode) {
         currentText.value = result.text
       }
     }
@@ -203,7 +197,6 @@ onMounted(async () => {
       sentenceQueue.length = 0
       if (displayTimer) { clearTimeout(displayTimer); displayTimer = null }
       isDisplaying = false
-      holdUntil = 0
       currentText.value = ''
     }
   })

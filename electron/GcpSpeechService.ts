@@ -32,6 +32,7 @@ export class GcpSpeechService extends EventEmitter {
     private currentAutoPunctuation: boolean = true
     private currentUseEnhanced: boolean = false
     private currentSingleUtterance: boolean = false
+    private currentProfanityFilter: boolean = false
     private currentMaxAlternatives: number = 1
     private currentConfidenceThreshold: number = 0.85
     private currentMinWordBuffer: number = 3
@@ -87,7 +88,8 @@ export class GcpSpeechService extends EventEmitter {
         gcpSingleUtterance?: boolean,
         gcpMaxAlternatives?: number,
         gcpConfidenceThreshold?: number,
-        gcpMinWordBuffer?: number
+        gcpMinWordBuffer?: number,
+        gcpProfanityFilter?: boolean
     }): Promise<boolean> {
         try {
             // Store config
@@ -101,6 +103,7 @@ export class GcpSpeechService extends EventEmitter {
             this.currentMaxAlternatives = config.gcpMaxAlternatives ?? 1
             this.currentConfidenceThreshold = config.gcpConfidenceThreshold ?? 0.85
             this.currentMinWordBuffer = config.gcpMinWordBuffer ?? 3
+            this.currentProfanityFilter = config.gcpProfanityFilter ?? false
 
             // Resolve languages: prefer array, fall back to single language
             if (config.languages && config.languages.length > 0) {
@@ -150,7 +153,8 @@ export class GcpSpeechService extends EventEmitter {
             enableAutomaticPunctuation: this.currentAutoPunctuation,
             model: this.currentModel,
             useEnhanced: this.currentUseEnhanced,
-            maxAlternatives: this.currentMaxAlternatives
+            maxAlternatives: this.currentMaxAlternatives,
+            profanityFilter: this.currentProfanityFilter
         }
 
         const streamingRequest = {
@@ -206,9 +210,14 @@ export class GcpSpeechService extends EventEmitter {
             }
         }
 
-        const text = bestAlt.transcript || ''
+        let text = bestAlt.transcript || ''
         const confidence = bestAlt.confidence || 0
         const isFinal = result.isFinal || false
+
+        // If profanity filter is active, strip GCP-masked tokens (e.g. "f***") entirely
+        if (this.currentProfanityFilter) {
+            text = this.filterMaskedWords(text)
+        }
 
         if (!text.trim()) return
 
@@ -382,6 +391,18 @@ export class GcpSpeechService extends EventEmitter {
         }
 
         this.pendingInterimResults.clear()
+    }
+
+    /**
+     * Removes GCP-masked profanity tokens (e.g. "f***", "sh**") from text.
+     * GCP masks profane words with asterisks; this removes them entirely so
+     * neither live captions nor the translation API ever receive them.
+     */
+    private filterMaskedWords(text: string): string {
+        return text
+            .replace(/\b\w\*+\w*\b/g, '') // remove masked tokens like f***, sh**
+            .replace(/\s{2,}/g, ' ')       // collapse extra whitespace
+            .trim()
     }
 
     /**
