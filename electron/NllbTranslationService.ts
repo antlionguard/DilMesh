@@ -1,31 +1,24 @@
 import { app } from 'electron'
+import { utilityProcess, UtilityProcess } from 'electron'
 import path from 'path'
+import { fileURLToPath } from 'url'
+
+// Needed to get dirname in ES modules
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 // Translation cache
 interface TranslationCache {
     [key: string]: string
 }
 
-/**
- * NllbTranslationService provides offline text-to-text translation using
- * Meta's NLLB-200 model via @huggingface/transformers (Transformers.js).
- *
- * Model: Xenova/nllb-200-distilled-600M (ONNX quantized, ~600MB-1.2GB)
- * Languages: 200+ (including Turkish: tur_Latn, English: eng_Latn)
- *
- * Same interface as GcpTranslationService:
- * - initialize() → load model (downloads on first use, caches locally)
- * - translate(text, targetLang, sourceLang?) → translated text
- * - isReady() → boolean
- * - clearCache()
- *
- * NLLB language codes use BCP-47 + script format: eng_Latn, tur_Latn, deu_Latn, etc.
- */
 export class NllbTranslationService {
-    private translator: any = null
+    private worker: UtilityProcess | null = null
     private cache: TranslationCache = {}
     private isLoaded: boolean = false
     private isLoading: boolean = false
+    private translateCallbacks: Map<string, { resolve: (val: string) => void, reject: (err: any) => void }> = new Map()
+    private initCallback: { resolve: (val: boolean) => void, reject: (err: any) => void } | null = null
 
     // NLLB uses special language codes
     private static readonly LANG_MAP: Record<string, string> = {
@@ -52,89 +45,118 @@ export class NllbTranslationService {
         return path.join(app.getPath('userData'), 'models', 'nllb')
     }
 
-    /**
-     * Initialize the translation pipeline.
-     * Downloads the model on first use (~600MB-1.2GB), then caches locally.
-     */
-    async initialize(): Promise<boolean> {
+    async initialize(allowDownload: boolean = false): Promise<boolean> {
         if (this.isLoaded) return true
         if (this.isLoading) return false
 
         this.isLoading = true
 
-        try {
-            // Dynamic import for ESM module
-            const { pipeline, env } = await import('@huggingface/transformers')
+        return new Promise((resolve, reject) => {
+            try {
+                const workerPath = path.join(__dirname, 'nllbWorker.js')
+                this.worker = utilityProcess.fork(workerPath, [], {
+                    execArgv: ['--max-old-space-size=8192'], // 8GB heap limit to prevent V8 code 5 OOM crashes
+                    stdio: 'pipe'
+                })
 
-            // Configure cache directory
-            env.cacheDir = this.cacheDir
+                this.worker.stdout?.on('data', (data) => console.log(`[NLLB Worker STDOUT]: ${data.toString()}`))
+                this.worker.stderr?.on('data', (data) => console.error(`[NLLB Worker STDERR]: ${data.toString()}`))
 
-            console.log('[NLLB] Loading translation model (first time may take a while to download)...')
+                this.worker.on('message', (msg: any) => {
+                    if (msg.type === 'init-success') {
+                        this.isLoaded = true
+                        this.isLoading = false
+                        console.log('[NLLB] Translation model loaded successfully in Worker')
+                        if (this.initCallback) {
+                            this.initCallback.resolve(true)
+                            this.initCallback = null
+                        }
+                    } else if (msg.type === 'init-error') {
+                        console.error('[NLLB] Failed to load model in worker:', msg.error)
+                        this.isLoaded = false
+                        this.isLoading = false
+                        if (this.initCallback) {
+                            this.initCallback.resolve(false)
+                            this.initCallback = null
+                        }
+                    } else if (msg.type === 'translate-success') {
+                        const cb = this.translateCallbacks.get(msg.id)
+                        if (cb) {
+                            cb.resolve(msg.translatedText)
+                            this.translateCallbacks.delete(msg.id)
+                        }
+                    } else if (msg.type === 'translate-error') {
+                        const cb = this.translateCallbacks.get(msg.id)
+                        if (cb) {
+                            cb.reject(new Error(msg.error))
+                            this.translateCallbacks.delete(msg.id)
+                        }
+                    }
+                })
 
-            this.translator = await pipeline(
-                'translation',
-                'Xenova/nllb-200-distilled-600M',
-                {
-                    // Use quantized model for faster loading
-                    dtype: 'q8',
-                }
-            )
+                this.worker.on('exit', (code) => {
+                    console.log(`[NLLB Worker] exited with code ${code}`)
+                    this.isLoaded = false
+                    this.isLoading = false
+                    this.worker = null
+                })
 
-            this.isLoaded = true
-            this.isLoading = false
-            console.log('[NLLB] Translation model loaded successfully')
-            return true
-        } catch (error) {
-            console.error('[NLLB] Failed to load model:', error)
-            this.isLoaded = false
-            this.isLoading = false
-            return false
-        }
+                this.initCallback = { resolve, reject }
+
+                console.log(`[NLLB] Sending init command to worker (allowDownload: ${allowDownload})...`)
+                this.worker.postMessage({
+                    type: 'init',
+                    payload: { allowDownload, cacheDir: this.cacheDir }
+                })
+
+            } catch (error) {
+                console.error('[NLLB] Failed to start worker:', error)
+                this.isLoaded = false
+                this.isLoading = false
+                resolve(false)
+            }
+        })
     }
 
-    /**
-     * Translate text.
-     *
-     * @param text - Text to translate
-     * @param targetLanguage - Target language (short code: 'en', 'tr', etc.)
-     * @param sourceLanguage - Source language (optional, auto-detect if omitted)
-     */
     async translate(
         text: string,
         targetLanguage: string,
         sourceLanguage?: string
     ): Promise<string> {
-        if (!this.isLoaded || !this.translator) {
+        if (!this.isLoaded || !this.worker) {
             throw new Error('NLLB model not loaded. Call initialize() first.')
         }
 
-        // Check cache
         const cacheKey = `${sourceLanguage || 'auto'}:${targetLanguage}:${text}`
         if (this.cache[cacheKey]) {
             return this.cache[cacheKey]
         }
 
-        try {
-            const srcLang = sourceLanguage
-                ? NllbTranslationService.LANG_MAP[sourceLanguage] || sourceLanguage
-                : 'eng_Latn'
-            const tgtLang = NllbTranslationService.LANG_MAP[targetLanguage] || targetLanguage
+        const srcLang = sourceLanguage ? NllbTranslationService.toNllbCode(sourceLanguage) : 'eng_Latn'
+        const tgtLang = NllbTranslationService.toNllbCode(targetLanguage)
 
-            const result = await this.translator(text, {
-                src_lang: srcLang,
-                tgt_lang: tgtLang,
+        // DEBUG
+        console.log(`[NLLB] Job dispatched to worker: "${text}" | src: ${srcLang} -> tgt: ${tgtLang}`)
+
+        return new Promise<string>((resolve) => {
+            const id = Math.random().toString(36).substring(7)
+
+            this.translateCallbacks.set(id, {
+                resolve: (translatedText: string) => {
+                    this.cache[cacheKey] = translatedText
+                    resolve(translatedText)
+                },
+                reject: (err: any) => {
+                    console.error('[NLLB Worker Error]', err)
+                    resolve(text) // fallback to original text
+                }
             })
 
-            const translatedText = result[0]?.translation_text || text
-
-            // Cache result
-            this.cache[cacheKey] = translatedText
-
-            return translatedText
-        } catch (error) {
-            console.error('[NLLB] Translation error:', error)
-            return text  // Return original text on error
-        }
+            this.worker!.postMessage({
+                type: 'translate',
+                payload: { text, srcLang, tgtLang, id }
+            })
+        })
     }
 
     isReady(): boolean {
@@ -159,13 +181,19 @@ export class NllbTranslationService {
      * Convert short language code to NLLB format.
      */
     static toNllbCode(langCode: string): string {
-        return NllbTranslationService.LANG_MAP[langCode] || langCode
+        if (!langCode) return 'eng_Latn'
+        // Strip region codes (e.g., "tr-TR" -> "tr")
+        const baseCode = langCode.split('-')[0].toLowerCase()
+        return NllbTranslationService.LANG_MAP[baseCode] || langCode
     }
 
     async destroy(): Promise<void> {
-        this.translator = null
+        if (this.worker) {
+            this.worker.kill()
+            this.worker = null
+        }
         this.isLoaded = false
         this.cache = {}
-        console.log('[NLLB] Destroyed')
+        console.log('[NLLB] Worker Destroyed')
     }
 }

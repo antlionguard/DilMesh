@@ -160,30 +160,36 @@ onMounted(async () => {
   // Listen for transcript updates from main process
   window.ipcRenderer.on('transcript-update', (_event, result: any) => {
 
-    if (result.isSentence) {
-      // ── Sentence (translated or punctuation-triggered) ───────────────────────
-      // Both translation mode and live mode use the same queue+CPS timer so that
-      // a sentence is never shown before the previous one's hold time has elapsed.
-      if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null }
-
-      if (isTranslationMode && queueMaxDepth > 0 && sentenceQueue.length >= queueMaxDepth) {
-        console.warn(`[Subtitle Queue] Max depth (${queueMaxDepth}) reached, dropping oldest sentence`)
-        sentenceQueue.shift()
-      }
-
-      insertOrdered(result.text, result.seq ?? Date.now())
-
-      if (!isDisplaying) {
-        isDisplaying = true
-        showNextFromQueue()
-      }
-    } else {
-      // ── Interim / live caption ──────────────────────────────────────────────
-      // Translation windows never reach here (blocked upstream in main.ts).
-      // Live caption windows always show interim in real time.
-      if (!isTranslationMode) {
+    if (!isTranslationMode) {
+      // ── LIVE MODE ──────────────────────────────────────────────────────────
+      // Live windows show raw interim text in real-time. No queue, no CPS.
+      // isSentence events are ignored — live mode is always showing the
+      // latest interim so users see what's being said right now.
+      if (!result.isSentence) {
         currentText.value = result.text
+        resetInactivityTimer()
       }
+      return
+    }
+
+    // ── TRANSLATION MODE ───────────────────────────────────────────────────
+    // Translation windows ONLY process isSentence events.
+    // These are punctuation-triggered clauses that have already been
+    // translated in main.ts. They go into the CPS queue.
+    if (!result.isSentence) return  // ignore interim completely
+
+    if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null }
+
+    if (queueMaxDepth > 0 && sentenceQueue.length >= queueMaxDepth) {
+      console.warn(`[Subtitle Queue] Max depth (${queueMaxDepth}) reached, dropping oldest sentence`)
+      sentenceQueue.shift()
+    }
+
+    insertOrdered(result.text, result.seq ?? Date.now())
+
+    if (!isDisplaying) {
+      isDisplaying = true
+      showNextFromQueue()
     }
   })
 

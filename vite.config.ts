@@ -10,7 +10,10 @@ export default defineConfig({
     electron({
       main: {
         // Shortcut of `build.lib.entry`.
-        entry: 'electron/main.ts',
+        entry: {
+          main: 'electron/main.ts',
+          nllbWorker: 'electron/nllbWorker.ts'
+        },
         vite: {
           build: {
             // Disable source maps in production for smaller bundle size
@@ -23,12 +26,13 @@ export default defineConfig({
                 'google-gax',
                 'google-auth-library',
                 'protobufjs',
-                // Native modules (Silero VAD, Vosk, NLLB)
+                // Native modules (Silero VAD, Vosk, NLLB, Sherpa)
                 'onnxruntime-node',
                 'avr-vad',
                 'vosk',
                 'ffi-napi',
                 'ref-napi',
+                'sherpa-onnx-node',
                 '@huggingface/transformers',
                 // Riva gRPC
                 '@grpc/grpc-js',

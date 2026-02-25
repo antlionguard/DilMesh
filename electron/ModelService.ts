@@ -19,10 +19,15 @@ export const AVAILABLE_MODELS = [
 ]
 
 // ── Sherpa-ONNX Streaming ASR Models ───────────────────────────────────────
+// URLs and dirNames verified from https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/asr-models
 export const SHERPA_MODELS = [
-    { id: 'sherpa-zipformer-en', name: 'English Zipformer', lang: 'en', dirName: 'sherpa-onnx-streaming-zipformer-en-2023-06-26', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2', size: '70MB' },
-    { id: 'sherpa-zipformer-bilingual-zh-en', name: 'Chinese+English', lang: 'zh', dirName: 'sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2', size: '70MB' },
-    { id: 'sherpa-paraformer-zh', name: 'Chinese Paraformer', lang: 'zh', dirName: 'sherpa-onnx-streaming-paraformer-bilingual-zh-en', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-paraformer-bilingual-zh-en.tar.bz2', size: '230MB' },
+    // Meta Omnilingual (1600+ languages, CTC) — v2 int8 = latest
+    { id: 'sherpa-omnilingual-1B-ctc', name: '🌍 Omnilingual 1B (1600 langs)', lang: 'multi', dirName: 'sherpa-onnx-omnilingual-asr-1600-languages-1B-ctc-v2-int8-2026-02-05', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-omnilingual-asr-1600-languages-1B-ctc-v2-int8-2026-02-05.tar.bz2', size: '~750MB', type: 'ctc' },
+    { id: 'sherpa-omnilingual-300M-ctc', name: '🌍 Omnilingual 300M (1600 langs)', lang: 'multi', dirName: 'sherpa-onnx-omnilingual-asr-1600-languages-300M-ctc-v2-int8-2026-02-05', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-omnilingual-asr-1600-languages-300M-ctc-v2-int8-2026-02-05.tar.bz2', size: '~280MB', type: 'ctc' },
+    // Language-specific (transducer)
+    { id: 'sherpa-zipformer-en', name: 'English Zipformer', lang: 'en', dirName: 'sherpa-onnx-streaming-zipformer-en-2023-06-26', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2', size: '310MB', type: 'transducer' },
+    { id: 'sherpa-zipformer-bilingual-zh-en', name: 'Chinese+English', lang: 'zh', dirName: 'sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2', size: '511MB', type: 'transducer' },
+    { id: 'sherpa-paraformer-zh', name: 'Chinese Paraformer', lang: 'zh', dirName: 'sherpa-onnx-streaming-paraformer-bilingual-zh-en', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-paraformer-bilingual-zh-en.tar.bz2', size: '1GB', type: 'paraformer' },
 ]
 
 // ── NLLB Translation Models ─────────────────────────────────────────────────
@@ -83,8 +88,11 @@ export class ModelService {
         })
 
         // NLLB
-        ipcMain.handle('get-downloaded-nllb-models', async () => {
+        ipcMain.handle('get-nllb-models', async () => {
             return this.scanNllbModels()
+        })
+        ipcMain.handle('delete-nllb-model', async () => {
+            return this.deleteNllbModels()
         })
     }
 
@@ -257,6 +265,20 @@ export class ModelService {
         } catch (error) {
             console.error('Failed to scan NLLB models:', error)
             return []
+        }
+    }
+
+    async deleteNllbModels(): Promise<boolean> {
+        try {
+            if (fs.existsSync(this.nllbModelsDir)) {
+                fs.rmSync(this.nllbModelsDir, { recursive: true, force: true })
+                console.log(`[ModelService] Deleted NLLB cache at ${this.nllbModelsDir}`)
+                return true
+            }
+            return false
+        } catch (error) {
+            console.error('[ModelService] Failed to delete NLLB models:', error)
+            throw error
         }
     }
 

@@ -240,16 +240,26 @@
           <h3 class="text-lg font-medium mb-3 text-emerald-400">🗣️ Sherpa-ONNX Models</h3>
           <p class="text-xs text-gray-500 mb-4">Offline streaming ASR. Download a model for your language.</p>
           <div class="space-y-2">
-            <div v-for="m in sherpaModels" :key="m.id" class="flex items-center justify-between p-3 bg-gray-800 rounded border border-gray-700">
-              <div>
-                <div class="font-medium text-white text-sm">{{ m.name }}</div>
-                <div class="text-xs text-gray-500">{{ m.size }}</div>
+            <div v-for="m in sherpaModels" :key="m.id"
+              class="flex items-center justify-between p-3 rounded border transition-colors cursor-pointer"
+              :class="settings.sherpaModel === m.id
+                ? 'bg-emerald-900/30 border-emerald-500/50'
+                : 'bg-gray-800 border-gray-700'"
+              @click="downloadedSherpaModels.includes(m.id) && (settings.sherpaModel = m.id)">
+              <div class="flex items-center gap-3">
+                <input type="radio" :value="m.id" v-model="settings.sherpaModel"
+                  :disabled="!downloadedSherpaModels.includes(m.id)"
+                  class="accent-emerald-500" />
+                <div>
+                  <div class="font-medium text-white text-sm">{{ m.name }}</div>
+                  <div class="text-xs text-gray-500">{{ m.size }}</div>
+                </div>
               </div>
               <div class="flex items-center gap-2">
-                <span v-if="downloadedSherpaModels.includes(m.id)" class="text-green-500 text-xs font-bold px-2 py-1 bg-green-900/30 rounded">✓</span>
-                <button v-if="downloadedSherpaModels.includes(m.id)" @click="deleteSherpaModel(m.id)" class="text-xs bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded transition-colors">🗑️</button>
-                <button v-else @click="downloadSherpaModel(m.id)" :disabled="!!downloadingModel" class="text-xs bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white px-2 py-1 rounded transition-colors">
-                  {{ downloadingModel === m.id ? '...' : '⬇️ Download' }}
+                <span v-if="downloadedSherpaModels.includes(m.id)" class="text-green-500 text-xs font-bold px-2 py-1 bg-green-900/30 rounded">✓ Ready</span>
+                <button v-if="downloadedSherpaModels.includes(m.id)" @click.stop="deleteSherpaModel(m.id)" class="text-xs bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded transition-colors">🗑️</button>
+                <button v-else @click.stop="downloadSherpaModel(m.id)" :disabled="!!downloadingModel" class="text-xs bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white px-2 py-1 rounded transition-colors">
+                  {{ downloadingModel === m.id ? 'Downloading...' : '⬇️ Download' }}
                 </button>
               </div>
             </div>
@@ -326,13 +336,16 @@
               <div class="text-xs text-gray-500">~800MB download, ONNX quantized</div>
             </div>
             <div class="flex items-center gap-2">
-              <span v-if="nllbDownloaded" class="text-green-500 text-xs font-bold px-2 py-1 bg-green-900/30 rounded">READY</span>
-              <span v-else class="text-yellow-500 text-xs px-2 py-1 bg-yellow-900/30 rounded">Auto-downloads on first use</span>
+              <span v-if="nllbDownloaded" class="text-green-500 text-xs font-bold px-2 py-1 bg-green-900/30 rounded">✓ Ready</span>
+              <button v-if="nllbDownloaded" @click.stop="deleteNllbModel" class="text-xs bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded transition-colors">🗑️</button>
+              <button v-else @click.stop="downloadNllbModel" :disabled="!!isDownloadingNllb" class="text-xs bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white px-2 py-1 rounded transition-colors">
+                {{ isDownloadingNllb ? '⏳ Downloading...' : '⬇️ Download' }}
+              </button>
             </div>
           </div>
 
           <div class="bg-pink-900/20 border border-pink-500/30 rounded p-3 text-xs text-pink-200">
-            <p>💡 The model will be automatically downloaded the first time you use NLLB translation. This may take several minutes depending on your connection.</p>
+            <p>💡 Click download to fetch the ONNX model (~800MB). It will stay on your PC and run securely offline.</p>
           </div>
         </div>
 
@@ -356,6 +369,25 @@
               <input type="number" v-model.number="settings.subtitleCPS" min="5" max="30" step="1" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-center text-sm" />
             </div>
             <p class="text-xs text-blue-400 mt-1">Characters Per Second. Netflix standard: 17. Lower = longer display.</p>
+          </div>
+
+          <div>
+            <label class="block text-sm text-gray-400 mb-2">Sentence Split Characters</label>
+            <div class="flex flex-wrap gap-2">
+              <label v-for="p in punctuationOptions" :key="p.char"
+                class="flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors text-sm"
+                :class="settings.sentenceSplitChars.includes(p.char)
+                  ? 'bg-emerald-900/40 border-emerald-500/50 text-emerald-300'
+                  : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'">
+                <input type="checkbox" :value="p.char"
+                  :checked="settings.sentenceSplitChars.includes(p.char)"
+                  @change="togglePunctuation(p.char)"
+                  class="sr-only" />
+                <span class="font-mono text-lg">{{ p.char }}</span>
+                <span class="text-xs">{{ p.label }}</span>
+              </label>
+            </div>
+            <p class="text-xs text-blue-400 mt-1">Interim text is split into sentences when these characters are detected.</p>
           </div>
         </div>
       </div>
@@ -491,6 +523,9 @@ const settings = ref({
   // Subtitle display
   subtitleQueueMaxDepth: 0,
   subtitleCPS: 17,
+  sentenceSplitChars: ['.', '!', '?', '…'],
+  // Sherpa-ONNX
+  sherpaModel: '',
   // GCP credentials
   gcpKeyJson: '',
   // AWS
@@ -531,10 +566,32 @@ const whisperModels = [
 ]
 
 const sherpaModels = [
-  { id: 'sherpa-zipformer-en', name: 'English Zipformer', size: '70MB' },
-  { id: 'sherpa-zipformer-bilingual-zh-en', name: 'Chinese+English', size: '70MB' },
-  { id: 'sherpa-paraformer-zh', name: 'Chinese Paraformer', size: '230MB' },
+  { id: 'sherpa-omnilingual-1B-ctc', name: '🌍 Omnilingual 1B (1600 langs)', size: '~750MB' },
+  { id: 'sherpa-omnilingual-300M-ctc', name: '🌍 Omnilingual 300M (1600 langs)', size: '~280MB' },
+  { id: 'sherpa-zipformer-en', name: 'English Zipformer', size: '310MB' },
+  { id: 'sherpa-zipformer-bilingual-zh-en', name: 'Chinese+English', size: '511MB' },
+  { id: 'sherpa-paraformer-zh', name: 'Chinese Paraformer', size: '1GB' },
 ]
+
+const punctuationOptions = [
+  { char: '.', label: 'Period' },
+  { char: '!', label: 'Exclamation' },
+  { char: '?', label: 'Question' },
+  { char: '…', label: 'Ellipsis' },
+  { char: ',', label: 'Comma' },
+  { char: ';', label: 'Semicolon' },
+  { char: ':', label: 'Colon' },
+]
+
+const togglePunctuation = (char: string) => {
+  const arr = settings.value.sentenceSplitChars as string[]
+  const idx = arr.indexOf(char)
+  if (idx >= 0) {
+    arr.splice(idx, 1)
+  } else {
+    arr.push(char)
+  }
+}
 
 const getAudioDevices = async () => {
   try {
@@ -577,11 +634,13 @@ onMounted(async () => {
 const refreshAllModels = async () => {
   downloadedWhisperModels.value = await window.ipcRenderer.invoke('get-downloaded-models')
   try {
-    downloadedSherpaModels.value = await window.ipcRenderer.invoke('get-downloaded-sherpa-models')
+    const downloadedModels = await window.ipcRenderer.invoke('get-downloaded-sherpa-models')
+    downloadedSherpaModels.value = downloadedModels || []
   } catch { downloadedSherpaModels.value = [] }
+  
   try {
-    const nllb = await window.ipcRenderer.invoke('get-downloaded-nllb-models')
-    nllbDownloaded.value = nllb.length > 0
+    const nllb = await window.ipcRenderer.invoke('get-nllb-models')
+    nllbDownloaded.value = nllb && nllb.length > 0
   } catch { nllbDownloaded.value = false }
 }
 
@@ -617,7 +676,9 @@ const downloadSherpaModel = async (modelId: string) => {
   try {
     await window.ipcRenderer.invoke('download-sherpa-model', modelId)
     await refreshAllModels()
-    alert(`Sherpa-ONNX model downloaded!`)
+    // Auto-select the downloaded model
+    settings.value.sherpaModel = modelId
+    alert(`Sherpa-ONNX model downloaded and selected!`)
   } catch (error) {
     alert(`Error: ${error}`)
   } finally {
@@ -629,9 +690,47 @@ const deleteSherpaModel = async (modelId: string) => {
   if (!confirm(`Delete Sherpa-ONNX model "${modelId}"?`)) return
   try {
     await window.ipcRenderer.invoke('delete-sherpa-model', modelId)
-    await refreshAllModels()
+    await refreshAllModels() // refresh list
+    if (settings.value.sherpaModel === modelId) {
+      settings.value.sherpaModel = '' // clear selection if deleted
+      // saveTranslationSettings() // This function doesn't exist in the provided context, removed.
+    }
   } catch (error) {
-    alert(`Error: ${error}`)
+    console.error('Failed to delete Sherpa model:', error)
+    alert('Failed to delete model. Check console.')
+  }
+}
+
+// NLLB model management
+const isDownloadingNllb = ref(false)
+const downloadNllbModel = async () => {
+  if (isDownloadingNllb.value) return
+  isDownloadingNllb.value = true
+  try {
+    const success = await window.ipcRenderer.invoke('initialize-nllb')
+    if (success) {
+      nllbDownloaded.value = true
+      alert('NLLB-200 model downloaded and initialized successfully!')
+    } else {
+      alert('Failed to download NLLB-200. Check console for details.')
+    }
+  } catch (error: any) {
+    console.error('Failed to download NLLB:', error)
+    alert(`Error: ${error.message || 'Unknown error'}`)
+  } finally {
+    isDownloadingNllb.value = false
+  }
+}
+
+const deleteNllbModel = async () => {
+  if (!confirm('Delete NLLB-200 downloaded model?')) return
+  try {
+    await window.ipcRenderer.invoke('delete-nllb-model')
+    nllbDownloaded.value = false
+    alert('NLLB-200 model deleted.')
+  } catch (error) {
+    console.error('Failed to delete NLLB model:', error)
+    alert('Failed to delete model.')
   }
 }
 
@@ -644,6 +743,10 @@ const saveSettings = async () => {
   if (settings.value.gcpKeyJson) {
     await window.ipcRenderer.invoke('update-gcp-credentials', settings.value.gcpKeyJson)
   }
+
+  // Update live pipeline settings
+  window.ipcRenderer.send('update-sentence-split-chars', settings.value.sentenceSplitChars)
+  await window.ipcRenderer.invoke('set-active-stt-provider', settings.value.sttProvider)
 
   alert('Settings saved!')
 }

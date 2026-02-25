@@ -521,7 +521,7 @@ const selectPreset = (preset: WindowPreset) => {
 
 const toggleTranscription = async () => {
   const settings = await window.ipcRenderer.invoke('get-settings', 'transcription')
-  const provider = settings?.provider || 'LOCAL'
+  const provider = settings?.sttProvider || settings?.provider || 'GCP'
   
   if (isTranscribing.value) {
     // Stop transcription based on provider
@@ -530,15 +530,30 @@ const toggleTranscription = async () => {
       stopGcpAudioCapture()
     } else if (provider === 'LOCAL') {
       await window.ipcRenderer.invoke('stop-local-transcription')
+    } else if (provider === 'SHERPA_ONNX') {
+      await window.ipcRenderer.invoke('stop-sherpa-transcription')
+      stopGcpAudioCapture() // same audio capture mechanism
+    } else if (provider === 'RIVA') {
+      await window.ipcRenderer.invoke('stop-riva-transcription')
+      stopGcpAudioCapture()
     }
-    // AWS and MOCK are handled in Projection window
     isTranscribing.value = false
   } else {
+    // Pre-initialize NLLB if it's the selected translation provider
+    if (settings?.translationProvider === 'NLLB') {
+      try {
+        await window.ipcRenderer.invoke('initialize-nllb', false)
+      } catch (e) {
+        console.error('Failed to init NLLB:', e)
+        alert('NLLB model failed to initialize or download required. Please try checking Settings or your model path.')
+      }
+    }
+
     // Start transcription based on provider
     if (provider === 'GCP') {
       await window.ipcRenderer.invoke('start-gcp-transcription', {
         gcpKeyJson: settings?.gcpKeyJson || '',
-        languages: settings?.recognitionLanguages || ['en'], // Use parallel languages array
+        languages: settings?.recognitionLanguages || ['en'],
         gcpModel: settings?.gcpModel || 'latest_long',
         gcpEncoding: settings?.gcpEncoding || 'LINEAR16',
         gcpInterimResults: settings?.gcpInterimResults ?? true,
@@ -550,7 +565,6 @@ const toggleTranscription = async () => {
         gcpMinWordBuffer: settings?.gcpMinWordBuffer ?? 3,
         gcpProfanityFilter: settings?.gcpProfanityFilter ?? false
       })
-      // Start audio capture and streaming
       await startGcpAudioCapture()
       isTranscribing.value = true
     } else if (provider === 'LOCAL') {
@@ -564,9 +578,30 @@ const toggleTranscription = async () => {
         model
       })
       isTranscribing.value = true
+    } else if (provider === 'SHERPA_ONNX') {
+      const sherpaModel = settings?.sherpaModel || ''
+      if (!sherpaModel) {
+        alert('Please select and download a Sherpa-ONNX model in Settings first.')
+        return
+      }
+      const modelPath = await window.ipcRenderer.invoke('get-sherpa-model-path', sherpaModel)
+      await window.ipcRenderer.invoke('start-sherpa-transcription', {
+        modelDir: modelPath,
+        language: settings?.language || 'auto',
+        sampleRate: 16000
+      })
+      // Start audio capture — same as GCP but sends to 'sherpa-audio-chunk'
+      await startSherpaAudioCapture()
+      isTranscribing.value = true
+    } else if (provider === 'RIVA') {
+      await window.ipcRenderer.invoke('start-riva-transcription', {
+        serverUrl: settings?.rivaServerUrl || 'localhost:50051',
+        language: settings?.language || 'en-US',
+        sampleRate: 16000
+      })
+      await startRivaAudioCapture()
+      isTranscribing.value = true
     } else if (provider === 'AWS' || provider === 'MOCK') {
-      // AWS and MOCK are handled via Projection window service
-      // Just toggle the flag, Projection.vue handles the actual service
       isTranscribing.value = true
     }
   }
@@ -577,6 +612,7 @@ const startGcpAudioCapture = async () => {
   try {
     gcpAudioStream = await navigator.mediaDevices.getUserMedia({
       audio: {
+        deviceId: selectedAudioDeviceId.value ? { exact: selectedAudioDeviceId.value } : undefined,
         sampleRate: 16000, 
         channelCount: 1,
         echoCancellation: true,
@@ -624,7 +660,65 @@ const stopGcpAudioCapture = () => {
     gcpAudioStream.getTracks().forEach(track => track.stop())
     gcpAudioStream = null
   }
-  console.log('GCP Audio capture stopped')
+  console.log('Audio capture stopped')
+}
+
+// Sherpa-ONNX audio capture — same as GCP but sends to 'sherpa-audio-chunk'
+const startSherpaAudioCapture = async () => {
+  try {
+    gcpAudioStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: selectedAudioDeviceId.value ? { exact: selectedAudioDeviceId.value } : undefined,
+        sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true
+      }
+    })
+    gcpAudioContext = new AudioContext({ sampleRate: 16000 })
+    const source = gcpAudioContext.createMediaStreamSource(gcpAudioStream)
+    gcpScriptProcessor = gcpAudioContext.createScriptProcessor(4096, 1, 1)
+    gcpScriptProcessor.onaudioprocess = (event) => {
+      const inputData = event.inputBuffer.getChannelData(0)
+      const int16Data = new Int16Array(inputData.length)
+      for (let i = 0; i < inputData.length; i++) {
+        const s = Math.max(-1, Math.min(1, inputData[i]))
+        int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+      }
+      window.ipcRenderer.send('sherpa-audio-chunk', int16Data.buffer)
+    }
+    source.connect(gcpScriptProcessor)
+    gcpScriptProcessor.connect(gcpAudioContext.destination)
+    console.log('Sherpa-ONNX audio capture started')
+  } catch (error) {
+    console.error('Failed to start Sherpa audio capture:', error)
+  }
+}
+
+// Riva audio capture — same as GCP but sends to 'riva-audio-chunk'
+const startRivaAudioCapture = async () => {
+  try {
+    gcpAudioStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: selectedAudioDeviceId.value ? { exact: selectedAudioDeviceId.value } : undefined,
+        sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true
+      }
+    })
+    gcpAudioContext = new AudioContext({ sampleRate: 16000 })
+    const source = gcpAudioContext.createMediaStreamSource(gcpAudioStream)
+    gcpScriptProcessor = gcpAudioContext.createScriptProcessor(4096, 1, 1)
+    gcpScriptProcessor.onaudioprocess = (event) => {
+      const inputData = event.inputBuffer.getChannelData(0)
+      const int16Data = new Int16Array(inputData.length)
+      for (let i = 0; i < inputData.length; i++) {
+        const s = Math.max(-1, Math.min(1, inputData[i]))
+        int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+      }
+      window.ipcRenderer.send('riva-audio-chunk', int16Data.buffer)
+    }
+    source.connect(gcpScriptProcessor)
+    gcpScriptProcessor.connect(gcpAudioContext.destination)
+    console.log('Riva audio capture started')
+  } catch (error) {
+    console.error('Failed to start Riva audio capture:', error)
+  }
 }
 
 // Watch for changes in selected preset to auto-update live window (Real-time styling)

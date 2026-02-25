@@ -75,27 +75,45 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
           win.webContents.send(channel, data)
           continue
         }
-        console.log(`[Main] Window ${windowId} translation needed. Target: ${language}, Source: ${data.detectedLanguage}`)
+        // Determine translation provider
+        let translationProvider = 'GCP'
+        try {
+          const transSettings: any = store.get('transcription')
+          if (transSettings?.translationProvider) {
+            translationProvider = transSettings.translationProvider
+          }
+        } catch { /* default to GCP */ }
 
-        // Translate the text if translation service is available
-        if (gcpTranslationService && gcpTranslationService.isReady()) {
-          try {
-            const translatedText = await gcpTranslationService.translate(
-              data.text,
-              language,
-              data.detectedLanguage // Use detected source language for better accuracy
-            )
-            console.log(`[Main] Translation result: "${translatedText}"`)
+        console.log(`[Main] Window ${windowId} translation needed. Target: ${language}, Source: ${data.detectedLanguage}, Provider: ${translationProvider}`)
+
+        try {
+          let translatedText: string | null = null
+
+          if (translationProvider === 'GCP' && gcpTranslationService && gcpTranslationService.isReady()) {
+            translatedText = await gcpTranslationService.translate(data.text, language, data.detectedLanguage)
+          } else if (translationProvider === 'RIVA' && rivaSpeechService) {
+            translatedText = await rivaSpeechService.translate(data.text, language, data.detectedLanguage)
+          } else if (translationProvider === 'NLLB' && nllbTranslationService) {
+            if (nllbTranslationService.isReady()) {
+              translatedText = await nllbTranslationService.translate(data.text, language, data.detectedLanguage)
+            } else {
+              console.warn(`[Main] NLLB translation service not initialized or model not downloaded yet.`)
+            }
+          } else {
+            console.warn(`[Main] Translation service ${translationProvider} not ready for window ${windowId}`)
+          }
+
+          if (translatedText !== null) {
+            console.log(`[${translationProvider}] Translation result: "${translatedText}"`)
             // Send translated version to this window
             win.webContents.send(channel, { ...data, text: translatedText })
-          } catch (error) {
-            console.error(`Translation failed for window ${windowId}:`, error)
-            // Fallback to original text
+          } else {
+            // No translation service ready, send original
             win.webContents.send(channel, data)
           }
-        } else {
-          console.warn(`[Main] Translation service not ready for window ${windowId}`)
-          // No translation service, send original
+        } catch (error) {
+          console.error(`[${translationProvider}] Translation failed for window ${windowId}:`, error)
+          // Fallback to original text
           win.webContents.send(channel, data)
         }
       } else {
@@ -268,10 +286,121 @@ app.whenReady().then(() => {
     })
   }
 
-  // Initialize Silero VAD
+  // ── Active STT provider ──────────────────────────────────────────────────
+  // Only ONE provider receives audio at a time. User selects in Settings.
+  let activeSTTProvider: string = 'GCP'
+  try {
+    const settings: any = store.get('transcription')
+    activeSTTProvider = settings?.sttProvider || 'GCP'
+  } catch { /* default to GCP */ }
+
+  ipcMain.handle('set-active-stt-provider', async (_, provider: string) => {
+    console.log(`[Main] Switching STT provider: ${activeSTTProvider} → ${provider}`)
+    activeSTTProvider = provider
+    return true
+  })
+
+  // ── Shared punctuation-detection pipeline ─────────────────────────────────
+  // All STT providers feed into this. It detects punctuation in interim results,
+  // slices clauses, and broadcasts them as isSentence=true for translation.
+  let translatedCharCount = 0
+  let lastInterimLanguage = ''
+  let sentenceSeq = 0
+  const MIN_CLAUSE_LENGTH = 8    // ignore tiny fragments
+
+  // Build regex from settings — chars like . ! ? need escaping
+  function buildPunctRegex(chars: string[]): RegExp {
+    if (!chars || chars.length === 0) return /[.!?…]/g
+    const escaped = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('')
+    return new RegExp(`[${escaped}]`, 'g')
+  }
+
+  let splitChars: string[] = ['.', '!', '?', '…']
+  try {
+    const s: any = store.get('transcription')
+    if (Array.isArray(s?.sentenceSplitChars) && s.sentenceSplitChars.length > 0) {
+      splitChars = s.sentenceSplitChars
+    }
+  } catch { /* defaults */ }
+  let punctRe = buildPunctRegex(splitChars)
+
+  // Live update when settings are saved
+  ipcMain.on('update-sentence-split-chars', (_, chars: string[]) => {
+    splitChars = chars
+    punctRe = buildPunctRegex(chars)
+    console.log(`[Main] Sentence split chars updated: ${chars.join(' ')}`)
+  })
+
+  function findLastPunctIndex(text: string, afterPos: number): number {
+    let lastIdx = -1
+    punctRe.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = punctRe.exec(text)) !== null) {
+      if (m.index >= afterPos) lastIdx = m.index
+    }
+    return lastIdx
+  }
+
+  function handleTranscriptResult(result: any, provider: string) {
+    if (!result.isFinal) {
+      // Send live captions to 'live' windows
+      broadcastLiveCaption({ ...result, provider, isSentence: false })
+
+      // Reset char counter if language flipped
+      const lang = result.detectedLanguage || result.language || ''
+      if (lang !== lastInterimLanguage) {
+        if (lastInterimLanguage) {
+          console.log(`[Main] Language flip ${lastInterimLanguage} → ${lang}, resetting char counter`)
+        }
+        translatedCharCount = 0
+        lastInterimLanguage = lang
+      }
+
+      // Check for new punctuation in growing interim text
+      const text = result.text || ''
+      const punctIdx = findLastPunctIndex(text, translatedCharCount)
+
+      if (punctIdx >= 0) {
+        const clause = text.substring(translatedCharCount, punctIdx + 1).trim()
+        if (clause.length >= MIN_CLAUSE_LENGTH) {
+          translatedCharCount = punctIdx + 1
+          const seq = ++sentenceSeq
+          console.log(`[Main] Interim punct → translating (${lang}) [seq=${seq}]: "${clause}"`)
+          void broadcastToProjectionWindows('transcript-update', {
+            provider,
+            text: clause,
+            isFinal: false,
+            confidence: result.confidence,
+            detectedLanguage: lang,
+            isSentence: true,
+            seq
+          })
+        }
+      }
+      return
+    }
+
+    // Final result: flush any remaining untranslated suffix
+    const finalText = (result.text || '').trim()
+    const remaining = finalText.substring(translatedCharCount).trim()
+    translatedCharCount = 0  // reset for next utterance
+
+    if (remaining.length > 0) {
+      const seq = ++sentenceSeq
+      console.log(`[Main] Final flush remaining [seq=${seq}]: "${remaining}"`)
+      void broadcastToProjectionWindows('transcript-update', {
+        ...result,
+        provider,
+        text: remaining,
+        isSentence: true,
+        seq
+      })
+    }
+  }
+
+  // ── Initialize Silero VAD ─────────────────────────────────────────────────
   if (!sileroVad) {
     sileroVad = new SileroVadService()
-    // Try to initialize with settings
     try {
       const settings: any = store.get('transcription')
       const vadEnabled = settings?.vadEnabled ?? true
@@ -286,101 +415,43 @@ app.whenReady().then(() => {
     } catch (error) {
       console.log('[Main] VAD initialization deferred, will passthrough audio')
     }
+
+    // ── Single audio router: VAD → active provider ──────────────────────────
+    // This is the ONLY audio-for-stt listener. It routes to whichever provider
+    // is currently selected, avoiding the duplicate-to-all-providers bug.
+    sileroVad.on('audio-for-stt', (audioChunk: Buffer) => {
+      switch (activeSTTProvider) {
+        case 'GCP':
+          if (gcpSpeechService) gcpSpeechService.writeAudio(audioChunk)
+          break
+        case 'SHERPA_ONNX':
+          if (sherpaOnnxService) sherpaOnnxService.writeAudio(audioChunk)
+          break
+        case 'RIVA':
+          if (rivaSpeechService) rivaSpeechService.writeAudio(audioChunk)
+          break
+      }
+    })
   }
 
+  // ── Initialize GCP STT ────────────────────────────────────────────────────
   if (!gcpSpeechService) {
     gcpSpeechService = new GcpSpeechService()
 
     // Wire VAD as audio preprocessor for GCP
-    // Audio flow: mic → GCP IPC handler → VAD.processAudio → audio-for-stt → writeAudio
     if (sileroVad) {
       gcpSpeechService.audioPreprocessor = (chunk: Buffer) => {
         sileroVad!.processAudio(chunk)
       }
-      sileroVad.on('audio-for-stt', (audioChunk: Buffer) => {
-        if (gcpSpeechService) {
-          gcpSpeechService.writeAudio(audioChunk)
-        }
-      })
-    }
-
-    // ── Interim punctuation tracker ─────────────────────────────────────────────
-    let translatedCharCount = 0
-    let lastInterimLanguage = ''   // reset char count when language flips
-    let sentenceSeq = 0            // monotonic sequence number for queue ordering
-    const PUNCT_RE = /[.!?…;,]/g
-    const MIN_CLAUSE_LENGTH = 5    // ignore tiny fragments like "yeah,"
-
-    function findLastPunctIndex(text: string, afterPos: number): number {
-      let lastIdx = -1
-      PUNCT_RE.lastIndex = 0
-      let m: RegExpExecArray | null
-      while ((m = PUNCT_RE.exec(text)) !== null) {
-        if (m.index >= afterPos) lastIdx = m.index
-      }
-      return lastIdx
     }
 
     gcpSpeechService.on('transcript', (result) => {
-      if (!result.isFinal) {
-        // Send live captions to 'live' windows
-        broadcastLiveCaption({ ...result, isSentence: false })
-
-        // Reset char counter if language flipped (different stream won)
-        const lang = result.detectedLanguage || ''
-        if (lang !== lastInterimLanguage) {
-          if (lastInterimLanguage) {
-            console.log(`[Main] Language flip ${lastInterimLanguage} → ${lang}, resetting char counter`)
-          }
-          translatedCharCount = 0
-          lastInterimLanguage = lang
-        }
-
-        // Check for new punctuation in growing interim text
-        const text = result.text || ''
-        const punctIdx = findLastPunctIndex(text, translatedCharCount)
-
-        if (punctIdx >= 0) {
-          const clause = text.substring(translatedCharCount, punctIdx + 1).trim()
-          if (clause.length >= MIN_CLAUSE_LENGTH) {
-            translatedCharCount = punctIdx + 1
-            const seq = ++sentenceSeq
-            console.log(`[Main] Interim punct → translating (${lang}) [seq=${seq}]: "${clause}"`)
-            void broadcastToProjectionWindows('transcript-update', {
-              provider: 'GCP',
-              text: clause,
-              isFinal: false,
-              confidence: result.confidence,
-              detectedLanguage: lang,
-              isSentence: true,
-              seq
-            })
-          }
-        }
-        return
-      }
-
-      // Final result: flush any remaining untranslated suffix
-      const finalText = (result.text || '').trim()
-      const remaining = finalText.substring(translatedCharCount).trim()
-      translatedCharCount = 0  // reset for next utterance
-
-      if (remaining.length > 0) {
-        const seq = ++sentenceSeq
-        console.log(`[Main] Final flush remaining [seq=${seq}]: "${remaining}"`)
-        void broadcastToProjectionWindows('transcript-update', {
-          ...result,
-          text: remaining,
-          isSentence: true,
-          seq
-        })
-      }
+      handleTranscriptResult(result, 'GCP')
     })
   }
 
   if (!gcpTranslationService) {
     gcpTranslationService = new GcpTranslationService()
-    // Initialize with GCP credentials from settings if available
     try {
       const settings: any = store.get('transcription')
       if (settings?.gcpKeyJson) {
@@ -391,33 +462,18 @@ app.whenReady().then(() => {
     }
   }
 
-  // Note: GcpSpeechService will emit transcript events that we listen to above
-
   // ── Initialize Sherpa-ONNX STT ──────────────────────────────────────────
   if (!sherpaOnnxService) {
     sherpaOnnxService = new SherpaOnnxSpeechService()
 
-    // Wire VAD as audio preprocessor for Sherpa-ONNX
     if (sileroVad) {
       sherpaOnnxService.audioPreprocessor = (chunk: Buffer) => {
         sileroVad!.processAudio(chunk)
       }
-      sileroVad.on('audio-for-stt', (audioChunk: Buffer) => {
-        if (sherpaOnnxService) {
-          sherpaOnnxService.writeAudio(audioChunk)
-        }
-      })
     }
 
-    // Sherpa-ONNX transcript events → same pipeline as GCP
     sherpaOnnxService.on('transcript', (result: any) => {
-      broadcastToProjectionWindows('transcription-result', {
-        text: result.text,
-        isFinal: result.isFinal,
-        language: result.language,
-        provider: 'SHERPA_ONNX',
-        confidence: result.confidence
-      })
+      handleTranscriptResult(result, 'SHERPA_ONNX')
     })
 
     sherpaOnnxService.on('error', (error) => {
@@ -429,27 +485,14 @@ app.whenReady().then(() => {
   if (!rivaSpeechService) {
     rivaSpeechService = new RivaSpeechService()
 
-    // Wire VAD as audio preprocessor for Riva
     if (sileroVad) {
       rivaSpeechService.audioPreprocessor = (chunk: Buffer) => {
         sileroVad!.processAudio(chunk)
       }
-      sileroVad.on('audio-for-stt', (audioChunk: Buffer) => {
-        if (rivaSpeechService) {
-          rivaSpeechService.writeAudio(audioChunk)
-        }
-      })
     }
 
-    // Riva transcript events → same pipeline as GCP/Sherpa
     rivaSpeechService.on('transcript', (result: any) => {
-      broadcastToProjectionWindows('transcription-result', {
-        text: result.text,
-        isFinal: result.isFinal,
-        language: result.language,
-        provider: 'RIVA',
-        confidence: result.confidence
-      })
+      handleTranscriptResult(result, 'RIVA')
     })
 
     rivaSpeechService.on('error', (error) => {
@@ -462,8 +505,8 @@ app.whenReady().then(() => {
     nllbTranslationService = new NllbTranslationService()
 
     // Initialize NLLB on demand via IPC
-    ipcMain.handle('initialize-nllb', async () => {
-      return nllbTranslationService?.initialize()
+    ipcMain.handle('initialize-nllb', async (_, allowDownload: boolean = true) => {
+      return nllbTranslationService?.initialize(allowDownload)
     })
 
     ipcMain.handle('nllb-translate', async (_, text: string, targetLang: string, sourceLang?: string) => {
