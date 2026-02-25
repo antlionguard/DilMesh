@@ -18,6 +18,7 @@
     "@google-cloud/translate": "^9.3.0",
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
+    "@huggingface/transformers": "^3.8.1",
     "@iconify/vue": "^5.0.0",
     "avr-vad": "^1.0.9",
     "electron-store": "^11.0.2",
