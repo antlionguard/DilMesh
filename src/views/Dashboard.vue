@@ -536,6 +536,9 @@ const toggleTranscription = async () => {
     } else if (provider === 'RIVA') {
       await window.ipcRenderer.invoke('stop-riva-transcription')
       stopGcpAudioCapture()
+    } else if (provider === 'DEEPGRAM') {
+      await window.ipcRenderer.invoke('stop-deepgram-transcription')
+      stopGcpAudioCapture()
     }
     isTranscribing.value = false
   } else {
@@ -600,6 +603,27 @@ const toggleTranscription = async () => {
         sampleRate: 16000
       })
       await startRivaAudioCapture()
+      isTranscribing.value = true
+    } else if (provider === 'DEEPGRAM') {
+      await window.ipcRenderer.invoke('start-deepgram-transcription', {
+        deepgramApiKey: settings?.deepgramApiKey || '',
+        languages: settings?.recognitionLanguages || ['en'],
+        deepgramModel: settings?.deepgramModel || 'nova-3',
+        deepgramLanguage: settings?.deepgramLanguage || 'multi',
+        deepgramPunctuate: settings?.deepgramPunctuate ?? true,
+        deepgramDiarize: settings?.deepgramDiarize ?? false,
+        deepgramUtterances: settings?.deepgramUtterances ?? true,
+        deepgramInterimResults: settings?.deepgramInterimResults ?? true,
+        deepgramEndpointing: settings?.deepgramEndpointing ?? 300,
+        deepgramSmartFormat: settings?.deepgramSmartFormat ?? true,
+        deepgramProfanityFilter: settings?.deepgramProfanityFilter ?? false,
+        deepgramUtteranceEndMs: settings?.deepgramUtteranceEndMs ?? 1000,
+        deepgramNoDelay: settings?.deepgramNoDelay ?? true,
+        deepgramEncoding: settings?.deepgramEncoding || 'linear16',
+        deepgramFillerWords: settings?.deepgramFillerWords ?? false,
+        deepgramKeywords: settings?.deepgramKeywords || '',
+      })
+      await startDeepgramAudioCapture()
       isTranscribing.value = true
     } else if (provider === 'AWS' || provider === 'MOCK') {
       isTranscribing.value = true
@@ -718,6 +742,51 @@ const startRivaAudioCapture = async () => {
     console.log('Riva audio capture started')
   } catch (error) {
     console.error('Failed to start Riva audio capture:', error)
+  }
+}
+
+// Deepgram audio capture — uses small buffer + accumulation for configurable chunk size
+let deepgramAccumulatedSamples: Int16Array | null = null
+let deepgramAccumulatedOffset = 0
+
+const startDeepgramAudioCapture = async () => {
+  const settings = await window.ipcRenderer.invoke('get-settings', 'transcription')
+  const chunkMs = settings?.deepgramChunkMs ?? 50 // default 50ms
+  const sampleRate = 16000
+  const targetSamples = Math.floor(sampleRate * chunkMs / 1000) // e.g. 50ms → 800 samples
+
+  // Pre-allocate accumulation buffer
+  deepgramAccumulatedSamples = new Int16Array(targetSamples)
+  deepgramAccumulatedOffset = 0
+
+  try {
+    gcpAudioStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: selectedAudioDeviceId.value ? { exact: selectedAudioDeviceId.value } : undefined,
+        sampleRate: sampleRate, channelCount: 1, echoCancellation: true, noiseSuppression: true
+      }
+    })
+    gcpAudioContext = new AudioContext({ sampleRate: sampleRate })
+    const source = gcpAudioContext.createMediaStreamSource(gcpAudioStream)
+    // Use smallest valid buffer for fine-grained accumulation
+    gcpScriptProcessor = gcpAudioContext.createScriptProcessor(256, 1, 1)
+    gcpScriptProcessor.onaudioprocess = (event) => {
+      const inputData = event.inputBuffer.getChannelData(0)
+      for (let i = 0; i < inputData.length; i++) {
+        const s = Math.max(-1, Math.min(1, inputData[i]))
+        deepgramAccumulatedSamples![deepgramAccumulatedOffset++] = s < 0 ? s * 0x8000 : s * 0x7FFF
+        // When target chunk is full, send and reset
+        if (deepgramAccumulatedOffset >= targetSamples) {
+          window.ipcRenderer.send('deepgram-audio-chunk', deepgramAccumulatedSamples!.buffer.slice(0))
+          deepgramAccumulatedOffset = 0
+        }
+      }
+    }
+    source.connect(gcpScriptProcessor)
+    gcpScriptProcessor.connect(gcpAudioContext.destination)
+    console.log(`Deepgram audio capture started (chunk: ${chunkMs}ms = ${targetSamples} samples)`)
+  } catch (error) {
+    console.error('Failed to start Deepgram audio capture:', error)
   }
 }
 

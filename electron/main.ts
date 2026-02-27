@@ -6,6 +6,7 @@ import { GcpTranslationService } from './GcpTranslationService'
 import { SileroVadService } from './SileroVadService'
 import { SherpaOnnxSpeechService } from './SherpaOnnxSpeechService'
 import { RivaSpeechService } from './RivaSpeechService'
+import { DeepgramSpeechService } from './DeepgramSpeechService'
 import { NllbTranslationService } from './NllbTranslationService'
 // import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -45,6 +46,7 @@ let gcpTranslationService: GcpTranslationService | null = null
 let sileroVad: SileroVadService | null = null
 let sherpaOnnxService: SherpaOnnxSpeechService | null = null
 let rivaSpeechService: RivaSpeechService | null = null
+let deepgramSpeechService: DeepgramSpeechService | null = null
 let nllbTranslationService: NllbTranslationService | null = null
 
 // Per-window language preferences
@@ -430,6 +432,9 @@ app.whenReady().then(() => {
         case 'RIVA':
           if (rivaSpeechService) rivaSpeechService.writeAudio(audioChunk)
           break
+        case 'DEEPGRAM':
+          if (deepgramSpeechService) deepgramSpeechService.writeAudio(audioChunk)
+          break
       }
     })
   }
@@ -497,6 +502,25 @@ app.whenReady().then(() => {
 
     rivaSpeechService.on('error', (error) => {
       console.error('[Main] Riva error:', error)
+    })
+  }
+
+  // ── Initialize Deepgram STT ─────────────────────────────────────────────
+  if (!deepgramSpeechService) {
+    deepgramSpeechService = new DeepgramSpeechService()
+
+    if (sileroVad) {
+      deepgramSpeechService.audioPreprocessor = (chunk: Buffer) => {
+        sileroVad!.processAudio(chunk)
+      }
+    }
+
+    deepgramSpeechService.on('transcript', (result: any) => {
+      handleTranscriptResult(result, 'DEEPGRAM')
+    })
+
+    deepgramSpeechService.on('error', (error) => {
+      console.error('[Main] Deepgram error:', error)
     })
   }
 

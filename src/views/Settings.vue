@@ -36,7 +36,7 @@
         <!-- Provider Selection -->
         <div>
           <h2 class="text-xl font-semibold mb-4 text-white">Speech-to-Text Provider</h2>
-          <div class="grid grid-cols-4 gap-2">
+          <div class="grid grid-cols-5 gap-2">
             <button
               v-for="p in sttProviders"
               :key="p.id"
@@ -266,6 +266,126 @@
           </div>
         </div>
 
+        <!-- Deepgram Settings (v-if DEEPGRAM) -->
+        <div v-if="settings.sttProvider === 'DEEPGRAM'" class="space-y-4 p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
+          <h3 class="text-lg font-medium mb-3 text-teal-400">🔊 Deepgram</h3>
+
+          <div class="bg-teal-900/20 border border-teal-500/30 rounded p-3 mb-4 text-xs text-teal-200">
+            <p class="font-bold mb-1">💰 Pricing & Free Tier:</p>
+            <ul class="list-disc list-inside space-y-1 opacity-90">
+              <li><strong>Pay-as-you-go:</strong> $0.0043/min (Nova-3). Free $200 credit on signup.</li>
+              <li><strong>Language detection</strong> built-in — no need for parallel streams!</li>
+            </ul>
+          </div>
+
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Model</label>
+            <select v-model="settings.deepgramModel" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2">
+              <optgroup label="✨ Nova (Latest)">
+                <option value="nova-3">Nova-3 — Best accuracy & speed</option>
+                <option value="nova-2">Nova-2 — Previous gen</option>
+                <option value="nova">Nova — First gen</option>
+              </optgroup>
+              <optgroup label="📦 Legacy">
+                <option value="enhanced">Enhanced</option>
+                <option value="base">Base</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Language</label>
+            <select v-model="settings.deepgramLanguage" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2">
+              <optgroup label="🌍 Auto">
+                <option value="multi">Multi (Auto Detect)</option>
+              </optgroup>
+              <optgroup label="Languages">
+                <option v-for="l in deepgramLanguages" :key="l.code" :value="l.code">{{ l.name }}</option>
+              </optgroup>
+            </select>
+            <p class="text-xs text-teal-400 mt-1">
+              "Multi" enables automatic language detection — single stream handles all languages.
+            </p>
+          </div>
+
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Audio Encoding</label>
+            <select v-model="settings.deepgramEncoding" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2">
+              <option value="linear16">Linear16 (PCM)</option>
+              <option value="flac">FLAC</option>
+              <option value="mulaw">Mulaw</option>
+              <option value="amr-nb">AMR-NB</option>
+              <option value="amr-wb">AMR-WB</option>
+              <option value="opus">Opus</option>
+              <option value="speex">Speex</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Endpointing: {{ settings.deepgramEndpointing === 0 ? 'Disabled' : settings.deepgramEndpointing + 'ms' }}</label>
+            <div class="flex items-center gap-4">
+              <input type="range" v-model.number="settings.deepgramEndpointing" min="0" max="5000" step="100" class="flex-1" />
+              <input type="number" v-model.number="settings.deepgramEndpointing" min="0" max="5000" step="100" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-center text-sm" />
+            </div>
+            <p class="text-xs text-gray-500 mt-1">How long to wait for speech pause before finalizing (0 = disabled)</p>
+          </div>
+
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Utterance End: {{ settings.deepgramUtteranceEndMs }}ms</label>
+            <div class="flex items-center gap-4">
+              <input type="range" v-model.number="settings.deepgramUtteranceEndMs" min="0" max="5000" step="100" class="flex-1" />
+              <input type="number" v-model.number="settings.deepgramUtteranceEndMs" min="0" max="5000" step="100" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-center text-sm" />
+            </div>
+            <p class="text-xs text-gray-500 mt-1">Timeout after last word before sending UtteranceEnd event</p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="settings.deepgramPunctuate" class="w-4 h-4 rounded border-gray-600" />
+              <span class="text-sm text-gray-300">Punctuate</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="settings.deepgramDiarize" class="w-4 h-4 rounded border-gray-600" />
+              <span class="text-sm text-gray-300">Diarize (Speaker ID)</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="settings.deepgramUtterances" class="w-4 h-4 rounded border-gray-600" />
+              <span class="text-sm text-gray-300">Utterances</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="settings.deepgramInterimResults" class="w-4 h-4 rounded border-gray-600" />
+              <span class="text-sm text-gray-300">Interim Results</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="settings.deepgramSmartFormat" class="w-4 h-4 rounded border-gray-600" />
+              <span class="text-sm text-gray-300">Smart Format</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="settings.deepgramProfanityFilter" class="w-4 h-4 rounded border-gray-600" />
+              <span class="text-sm text-gray-300">🚫 Profanity Filter</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="settings.deepgramFillerWords" class="w-4 h-4 rounded border-gray-600" />
+              <span class="text-sm text-gray-300">Filler Words (um, uh)</span>
+            </label>
+          </div>
+
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Audio Chunk Size: {{ settings.deepgramChunkMs }}ms</label>
+            <div class="flex items-center gap-4">
+              <input type="range" v-model.number="settings.deepgramChunkMs" min="20" max="200" step="10" class="flex-1" />
+              <input type="number" v-model.number="settings.deepgramChunkMs" min="20" max="200" step="10" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-center text-sm" />
+            </div>
+            <p class="text-xs text-gray-500 mt-1">Size of audio chunks sent to Deepgram. Smaller = lower latency, larger = more stable.</p>
+          </div>
+
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Keywords (comma separated)</label>
+            <input v-model="settings.deepgramKeywords" type="text" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm" placeholder="DilMesh, Deepgram, specific terms..." />
+            <p class="text-xs text-gray-500 mt-1">Boost recognition of specific terms. Only works with Nova-2 model (ignored for Nova-3).</p>
+          </div>
+        </div>
+
         <!-- Riva Settings (v-if RIVA) -->
         <div v-if="settings.sttProvider === 'RIVA'" class="p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
           <h3 class="text-lg font-medium mb-3 text-amber-400">⚡ NVIDIA Riva</h3>
@@ -435,6 +555,16 @@
           </div>
         </div>
 
+        <!-- Deepgram -->
+        <div class="p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
+          <h3 class="text-lg font-medium mb-3 text-teal-400">🔊 Deepgram</h3>
+          <p class="text-xs text-gray-500 mb-3">Sign up at <a href="https://console.deepgram.com" target="_blank" class="text-teal-400 underline">console.deepgram.com</a> for a free API key ($200 credit).</p>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">API Key</label>
+            <input v-model="settings.deepgramApiKey" type="password" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 font-mono text-xs" placeholder="Enter your Deepgram API key" />
+          </div>
+        </div>
+
         <!-- Riva -->
         <div class="p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
           <h3 class="text-lg font-medium mb-3 text-amber-400">⚡ NVIDIA Riva</h3>
@@ -483,6 +613,7 @@ const tabs = [
 
 const sttProviders = [
   { id: 'GCP', name: 'GCP', icon: '☁️', badge: 'Cloud' },
+  { id: 'DEEPGRAM', name: 'Deepgram', icon: '🔊', badge: 'Cloud' },
   { id: 'RIVA', name: 'Riva', icon: '⚡', badge: 'GPU Server' },
   { id: 'SHERPA_ONNX', name: 'Sherpa', icon: '🗣️', badge: 'Offline' },
   { id: 'LOCAL', name: 'Whisper', icon: '🎧', badge: 'Offline' },
@@ -528,6 +659,23 @@ const settings = ref({
   sherpaModel: '',
   // GCP credentials
   gcpKeyJson: '',
+  // Deepgram
+  deepgramApiKey: '',
+  deepgramModel: 'nova-3',
+  deepgramLanguage: 'multi',
+  deepgramPunctuate: true,
+  deepgramDiarize: false,
+  deepgramUtterances: true,
+  deepgramInterimResults: true,
+  deepgramEndpointing: 300,
+  deepgramSmartFormat: true,
+  deepgramProfanityFilter: false,
+  deepgramUtteranceEndMs: 1000,
+  deepgramNoDelay: true,
+  deepgramEncoding: 'linear16',
+  deepgramFillerWords: false,
+  deepgramKeywords: '',
+  deepgramChunkMs: 50,
   // AWS
   awsRegion: 'us-east-1',
   awsAccessKeyId: '',
@@ -571,6 +719,54 @@ const sherpaModels = [
   { id: 'sherpa-zipformer-en', name: 'English Zipformer', size: '310MB' },
   { id: 'sherpa-zipformer-bilingual-zh-en', name: 'Chinese+English', size: '511MB' },
   { id: 'sherpa-paraformer-zh', name: 'Chinese Paraformer', size: '1GB' },
+]
+
+const deepgramLanguages = [
+  { code: 'en', name: 'English' },
+  { code: 'en-US', name: 'English (US)' },
+  { code: 'en-GB', name: 'English (UK)' },
+  { code: 'en-AU', name: 'English (AU)' },
+  { code: 'tr', name: 'Turkish' },
+  { code: 'de', name: 'German' },
+  { code: 'fr', name: 'French' },
+  { code: 'es', name: 'Spanish' },
+  { code: 'pt', name: 'Portuguese' },
+  { code: 'pt-BR', name: 'Portuguese (Brazil)' },
+  { code: 'it', name: 'Italian' },
+  { code: 'nl', name: 'Dutch' },
+  { code: 'ja', name: 'Japanese' },
+  { code: 'ko', name: 'Korean' },
+  { code: 'zh', name: 'Chinese' },
+  { code: 'hi', name: 'Hindi' },
+  { code: 'ar', name: 'Arabic' },
+  { code: 'ru', name: 'Russian' },
+  { code: 'pl', name: 'Polish' },
+  { code: 'sv', name: 'Swedish' },
+  { code: 'da', name: 'Danish' },
+  { code: 'fi', name: 'Finnish' },
+  { code: 'no', name: 'Norwegian' },
+  { code: 'uk', name: 'Ukrainian' },
+  { code: 'cs', name: 'Czech' },
+  { code: 'el', name: 'Greek' },
+  { code: 'ro', name: 'Romanian' },
+  { code: 'hu', name: 'Hungarian' },
+  { code: 'id', name: 'Indonesian' },
+  { code: 'ms', name: 'Malay' },
+  { code: 'th', name: 'Thai' },
+  { code: 'vi', name: 'Vietnamese' },
+  { code: 'bg', name: 'Bulgarian' },
+  { code: 'hr', name: 'Croatian' },
+  { code: 'sk', name: 'Slovak' },
+  { code: 'sl', name: 'Slovenian' },
+  { code: 'sr', name: 'Serbian' },
+  { code: 'ca', name: 'Catalan' },
+  { code: 'eu', name: 'Basque' },
+  { code: 'gl', name: 'Galician' },
+  { code: 'lt', name: 'Lithuanian' },
+  { code: 'lv', name: 'Latvian' },
+  { code: 'et', name: 'Estonian' },
+  { code: 'tl', name: 'Tagalog' },
+  { code: 'sw', name: 'Swahili' },
 ]
 
 const punctuationOptions = [

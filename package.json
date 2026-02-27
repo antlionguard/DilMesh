@@ -1,7 +1,7 @@
 {
   "name": "dilmesh",
   "private": true,
-  "version": "1.0.1",
+  "version": "2.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,6 +14,7 @@
   "dependencies": {
     "@aws-sdk/client-transcribe-streaming": "^3.985.0",
     "@aws-sdk/util-utf8-node": "^3.259.0",
+    "@deepgram/sdk": "^4.11.3",
     "@google-cloud/speech": "^7.2.1",
     "@google-cloud/translate": "^9.3.0",
     "@grpc/grpc-js": "^1.14.3",

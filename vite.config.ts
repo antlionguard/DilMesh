@@ -37,6 +37,9 @@ export default defineConfig({
                 // Riva gRPC
                 '@grpc/grpc-js',
                 '@grpc/proto-loader',
+                // WebSocket native optional deps (used by Deepgram SDK's ws)
+                'bufferutil',
+                'utf-8-validate',
               ]
             }
           }
