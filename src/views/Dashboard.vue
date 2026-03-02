@@ -107,7 +107,7 @@
       <!-- Editor Panel (Right Side) -->
       <div v-if="selectedPreset" class="w-2/3 bg-gray-800 rounded-xl p-6 border border-gray-700 overflow-y-auto">
         <h2 class="text-xl font-bold mb-6 border-b border-gray-700 pb-2 flex justify-between items-center">
-          <span>Edit: <input v-model="selectedPreset.name" class="bg-transparent border-b border-gray-600 focus:border-blue-500 outline-none px-1" /></span>
+          <span>Edit: <input v-model="selectedPreset.name" type="text" class="bg-gray-900 border-b border-gray-600 focus:border-blue-500 outline-none px-2 py-0.5 rounded-sm" @click.stop /></span>
           <button 
             v-if="activeWindows.has(selectedPreset.id)"
             @click="reloadWindow(selectedPreset.id)"
@@ -895,9 +895,14 @@ const startDeepgramAudioCapture = async () => {
 }
 
 // Watch for changes in selected preset to auto-update live window (Real-time styling)
+// Debounced to prevent IPC flood on every keystroke (fixes Windows input focus loss)
+let watchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 watch(() => selectedPreset.value, (newVal) => {
   if (newVal && activeWindows.value.has(newVal.id)) {
-    updateLiveWindow(newVal)
+    if (watchDebounceTimer) clearTimeout(watchDebounceTimer)
+    watchDebounceTimer = setTimeout(() => {
+      updateLiveWindow(newVal)
+    }, 300)
   }
 }, { deep: true })
 
