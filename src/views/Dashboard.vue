@@ -79,7 +79,7 @@
              </div>
              <div class="flex items-center gap-2 text-xs text-gray-400">
                 <span>🌐</span>
-                <span>{{ getLanguageLabel(preset.language) }}</span>
+                <span>{{ getLanguageSummary(preset) }}</span>
              </div>
           </div>
 
@@ -118,140 +118,169 @@
           </button>
         </h2>
         
-        <div class="grid grid-cols-2 gap-6">
-          <!-- Colors -->
-          <div class="space-y-4">
-            <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider">Appearance</h3>
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Background (Chroma)</label>
-              <div class="flex gap-2">
-                <input v-model="selectedPreset.style.backgroundColor" type="color" class="h-9 w-16 rounded cursor-pointer border border-gray-600" />
-                <input v-model="selectedPreset.style.backgroundColor" type="text" class="flex-1 bg-gray-900 border border-gray-700 rounded px-3 text-sm font-mono uppercase" />
-              </div>
-            </div>
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Text Color</label>
-              <div class="flex gap-2">
-                <input v-model="selectedPreset.style.textColor" type="color" class="h-9 w-16 rounded cursor-pointer border border-gray-600" />
-                 <input v-model="selectedPreset.style.textColor" type="text" class="flex-1 bg-gray-900 border border-gray-700 rounded px-3 text-sm font-mono uppercase" />
-              </div>
-            </div>
-          </div>
-
-          <!-- Typography -->
-           <div class="space-y-4">
-            <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider">Typography</h3>
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Font Family</label>
-              <select v-model="selectedPreset.style.fontFamily" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2">
-                <option value="Arial">Arial</option>
-                <option value="Verdana">Verdana</option>
-                <option value="Helvetica">Helvetica</option>
-                <option value="Georgia">Georgia</option>
-                <option value="Courier New">Courier New</option>
-                <option value="Impact">Impact</option>
-              </select>
-            </div>
-             <div>
-              <label class="block text-sm text-gray-400 mb-1">Font Size: <span class="text-blue-400">{{ selectedPreset.style.fontSize }}px</span></label>
-              <input v-model.number="selectedPreset.style.fontSize" type="range" min="12" max="120" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
-            </div>
-            <div class="flex items-center gap-2 pt-2">
-               <input v-model="selectedPreset.style.textShadow" type="checkbox" id="shadow" class="w-5 h-5 rounded border-gray-600 accent-blue-500" />
-               <label for="shadow" class="text-sm select-none cursor-pointer text-gray-300">Enable Text Shadow</label>
-            </div>
-          </div>
-
-           <!-- Layout -->
-           <div class="col-span-2 grid grid-cols-2 gap-6 pt-4 border-t border-gray-700/50">
-             <div>
-               <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider mb-4">Layout</h3>
-                <div class="space-y-4">
-                  <div>
-                    <label class="block text-sm text-gray-400 mb-1">Vertical Alignment</label>
-                    <select v-model="selectedPreset.style.justifyContent" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2">
-                      <option value="flex-start">Top</option>
-                      <option value="center">Center</option>
-                      <option value="flex-end">Bottom</option>
-                    </select>
-                  </div>
-                   <div>
-                      <label class="block text-sm text-gray-400 mb-1">Max Lines (0 = Unlimited)</label>
-                      <input v-model.number="selectedPreset.style.maxLines" type="number" min="0" max="10" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2" />
-                   </div>
+        <div class="space-y-6">
+          <!-- Shared Style Controls -->
+          <div class="grid grid-cols-2 gap-6">
+            <!-- Appearance -->
+            <div class="space-y-4">
+              <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider">Appearance</h3>
+              <div>
+                <label class="block text-sm text-gray-400 mb-1">Background (Chroma)</label>
+                <div class="flex gap-2">
+                  <input v-model="selectedPreset.style.backgroundColor" type="color" class="h-9 w-16 rounded cursor-pointer border border-gray-600" />
+                  <input v-model="selectedPreset.style.backgroundColor" type="text" class="flex-1 bg-gray-900 border border-gray-700 rounded px-3 text-sm font-mono uppercase" />
                 </div>
-             </div>
-
-             <!-- Hardware -->
-             <div>
-               <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider mb-4">Display Target</h3>
-               <div class="space-y-4">
-                 <div>
-                   <label class="block text-sm text-gray-400 mb-1">Target Display</label>
-                   <select v-model="selectedPreset.targetDisplayId" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2">
-                     <option :value="undefined">Windowed Mode (Default)</option>
-                     <option v-for="display in displays" :key="display.id" :value="display.id">
-                       {{ display.label }} ({{ display.bounds.width }}x{{ display.bounds.height }})
-                     </option>
-                   </select>
-                   <p class="text-xs text-gray-500 mt-1">If set, opening will force fullscreen on this display.</p>
-                 </div>
-                 
-                 <div>
-                   <label class="block text-sm text-gray-400 mb-1">Display Language</label>
-                   <select v-model="selectedPreset.language" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2">
-                     <option value="live">🎙️ Live Captions (No Translation)</option>
-                     <option value="en">🇬🇧 English</option>
-                     <option value="tr">🇹🇷 Turkish</option>
-                     <option value="es">🇪🇸 Spanish</option>
-                     <option value="fr">🇫🇷 French</option>
-                     <option value="de">🇩🇪 German</option>
-                     <option value="it">🇮🇹 Italian</option>
-                     <option value="pt">🇵🇹 Portuguese</option>
-                     <option value="ru">🇷🇺 Russian</option>
-                     <option value="ja">🇯🇵 Japanese</option>
-                     <option value="ko">🇰🇷 Korean</option>
-                     <option value="zh">🇨🇳 Chinese</option>
-                     <option value="ar">🇸🇦 Arabic</option>
-                   </select>
-                   <p class="text-xs text-gray-500 mt-1">Select 'Live Captions' for original text, or choose a language for real-time translation.</p>
-                 </div>
-               </div>
-             </div>
-            
-            <!-- Position Controls -->
-            <div class="col-span-2 space-y-4 pt-4 border-t border-gray-700/50">
-              <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider">Subtitle Position</h3>
-              
-              <div>
-                <label class="block text-sm text-gray-400 mb-1">
-                  Horizontal (X): <span class="text-blue-400">{{ selectedPreset.style.positionX }}%</span>
-                </label>
-                <input 
-                  v-model.number="selectedPreset.style.positionX" 
-                  type="range" 
-                  min="0" 
-                  max="100" 
-                  class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" 
-                />
-                <p class="text-xs text-gray-500 mt-1">0% = Left edge, 50% = Center, 100% = Right edge</p>
               </div>
-              
-              <div>
-                <label class="block text-sm text-gray-400 mb-1">
-                  Vertical (Y): <span class="text-blue-400">{{ selectedPreset.style.positionY }}%</span>
-                </label>
-                <input 
-                  v-model.number="selectedPreset.style.positionY" 
-                  type="range" 
-                  min="0" 
-                  max="100" 
-                  class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" 
-                />
-                <p class="text-xs text-gray-500 mt-1">0% = Top edge, 50% = Center, 100% = Bottom edge</p>
+              <div class="flex items-center gap-2 pt-2">
+                <input v-model="selectedPreset.style.textShadow" type="checkbox" :id="'shadow-'+selectedPreset.id" class="w-5 h-5 rounded border-gray-600 accent-blue-500" />
+                <label :for="'shadow-'+selectedPreset.id" class="text-sm select-none cursor-pointer text-gray-300">Enable Text Shadow</label>
               </div>
             </div>
-           </div>
+
+            <!-- Layout & Display -->
+            <div class="space-y-4">
+              <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider">Display Target</h3>
+              <div>
+                <label class="block text-sm text-gray-400 mb-1">Target Display</label>
+                <select v-model="selectedPreset.targetDisplayId" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2">
+                  <option :value="undefined">Windowed Mode (Default)</option>
+                  <option v-for="display in displays" :key="display.id" :value="display.id">
+                    {{ display.label }} ({{ display.bounds.width }}x{{ display.bounds.height }})
+                  </option>
+                </select>
+                <p class="text-xs text-gray-500 mt-1">If set, opening will force fullscreen on this display.</p>
+              </div>
+              <div>
+                <label class="block text-sm text-gray-400 mb-1">Vertical Alignment</label>
+                <select v-model="selectedPreset.style.justifyContent" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2">
+                  <option value="flex-start">Top</option>
+                  <option value="center">Center</option>
+                  <option value="flex-end">Bottom</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Language Layers -->
+          <div class="pt-4 border-t border-gray-700/50">
+            <div class="flex justify-between items-center mb-4">
+              <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider">Languages</h3>
+              <button @click="addLanguageLayer" class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded transition-colors">
+                + Add Language
+              </button>
+            </div>
+
+            <div v-if="selectedPreset.languages.length === 0" class="text-center text-gray-500 py-8 border border-dashed border-gray-700 rounded-lg">
+              <p>No languages added yet. Click "+ Add Language" to start.</p>
+            </div>
+
+            <div class="space-y-3">
+              <div 
+                v-for="(layer, layerIndex) in selectedPreset.languages" 
+                :key="layer.id"
+                class="bg-gray-900/50 rounded-lg border border-gray-700 overflow-hidden"
+              >
+                <!-- Layer Header -->
+                <div 
+                  class="flex justify-between items-center px-4 py-2.5 cursor-pointer hover:bg-gray-700/30 transition-colors"
+                  @click="toggleLayerExpanded(layer.id)"
+                >
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-500 text-xs">{{ layerIndex + 1 }}.</span>
+                    <span>{{ getLanguageLabel(layer.language) }}</span>
+                    <span class="text-xs text-gray-500">— {{ layer.fontSize }}px, ({{ layer.positionX }}%, {{ layer.positionY }}%)</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button 
+                      @click.stop="removeLanguageLayer(layerIndex)" 
+                      class="text-red-400 hover:text-red-300 text-xs px-2 py-1 rounded hover:bg-red-900/20 transition-colors"
+                      title="Remove this language"
+                    >
+                      🗑️
+                    </button>
+                    <span class="text-gray-500 text-xs">{{ expandedLayers.has(layer.id) ? '▼' : '▶' }}</span>
+                  </div>
+                </div>
+
+                <!-- Layer Settings (Expanded) -->
+                <div v-if="expandedLayers.has(layer.id)" class="px-4 pb-4 space-y-4 border-t border-gray-700/50">
+                  <div class="grid grid-cols-2 gap-4 pt-3">
+                    <!-- Language Selection -->
+                    <div>
+                      <label class="block text-sm text-gray-400 mb-1">Language</label>
+                      <select v-model="layer.language" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm">
+                        <option value="live">🎙️ Live Captions (No Translation)</option>
+                        <option value="en">🇬🇧 English</option>
+                        <option value="tr">🇹🇷 Turkish</option>
+                        <option value="es">🇪🇸 Spanish</option>
+                        <option value="fr">🇫🇷 French</option>
+                        <option value="de">🇩🇪 German</option>
+                        <option value="it">🇮🇹 Italian</option>
+                        <option value="pt">🇵🇹 Portuguese</option>
+                        <option value="ru">🇷🇺 Russian</option>
+                        <option value="ja">🇯🇵 Japanese</option>
+                        <option value="ko">🇰🇷 Korean</option>
+                        <option value="zh">🇨🇳 Chinese</option>
+                        <option value="ar">🇸🇦 Arabic</option>
+                      </select>
+                    </div>
+
+                    <!-- Text Color -->
+                    <div>
+                      <label class="block text-sm text-gray-400 mb-1">Text Color</label>
+                      <div class="flex gap-2">
+                        <input v-model="layer.textColor" type="color" class="h-9 w-12 rounded cursor-pointer border border-gray-600" />
+                        <input v-model="layer.textColor" type="text" class="flex-1 bg-gray-800 border border-gray-600 rounded px-3 text-sm font-mono uppercase" />
+                      </div>
+                    </div>
+
+                    <!-- Font Family -->
+                    <div>
+                      <label class="block text-sm text-gray-400 mb-1">Font Family</label>
+                      <select v-model="layer.fontFamily" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm">
+                        <option value="Arial">Arial</option>
+                        <option value="Verdana">Verdana</option>
+                        <option value="Helvetica">Helvetica</option>
+                        <option value="Georgia">Georgia</option>
+                        <option value="Courier New">Courier New</option>
+                        <option value="Impact">Impact</option>
+                      </select>
+                    </div>
+
+                    <!-- Font Size -->
+                    <div>
+                      <label class="block text-sm text-gray-400 mb-1">Font Size: <span class="text-blue-400">{{ layer.fontSize }}px</span></label>
+                      <input v-model.number="layer.fontSize" type="range" min="12" max="120" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                    </div>
+
+                    <!-- Position X -->
+                    <div>
+                      <label class="block text-sm text-gray-400 mb-1">
+                        Position X: <span class="text-blue-400">{{ layer.positionX }}%</span>
+                      </label>
+                      <input v-model.number="layer.positionX" type="range" min="0" max="100" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                      <p class="text-xs text-gray-500 mt-0.5">0% = Left, 50% = Center, 100% = Right</p>
+                    </div>
+
+                    <!-- Position Y -->
+                    <div>
+                      <label class="block text-sm text-gray-400 mb-1">
+                        Position Y: <span class="text-blue-400">{{ layer.positionY }}%</span>
+                      </label>
+                      <input v-model.number="layer.positionY" type="range" min="0" max="100" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                      <p class="text-xs text-gray-500 mt-0.5">0% = Top, 50% = Center, 100% = Bottom</p>
+                    </div>
+
+                    <!-- Max Lines -->
+                    <div>
+                      <label class="block text-sm text-gray-400 mb-1">Max Lines (0 = Unlimited)</label>
+                      <input v-model.number="layer.maxLines" type="number" min="0" max="10" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       
@@ -267,16 +296,21 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import AnalogVuMeter from '../components/AnalogVuMeter.vue'
 
-interface WindowStyle {
-  backgroundColor: string
-  textColor: string
+interface LanguageLayer {
+  id: string
+  language: string          // 'live' | 'en' | 'tr' | 'es' ...
+  positionX: number         // 0-100 (%)
+  positionY: number         // 0-100 (%)
   fontSize: number
   fontFamily: string
-  textShadow: boolean
+  textColor: string
   maxLines: number
+}
+
+interface WindowStyle {
+  backgroundColor: string
+  textShadow: boolean
   justifyContent: 'flex-start' | 'center' | 'flex-end'
-  positionX: number  // 0-100 (percentage from left)
-  positionY: number  // 0-100 (percentage from top)
 }
 
 interface WindowPreset {
@@ -284,7 +318,8 @@ interface WindowPreset {
   name: string
   audioDeviceId?: string
   targetDisplayId?: number
-  language?: string  // 'live' or language code (en, tr, es, etc.)
+  language?: string  // DEPRECATED: kept for backward compat migration
+  languages: LanguageLayer[]
   style: WindowStyle
 }
 
@@ -292,6 +327,7 @@ const presets = ref<WindowPreset[]>([])
 const activeWindows = ref<Set<string>>(new Set()) // Track IDs of open windows
 const isTranscribing = ref(false)
 const selectedAudioDeviceId = ref<string>('')
+const expandedLayers = ref<Set<string>>(new Set()) // Track which language layers are expanded in editor
 
 // GCP Audio streaming state
 let gcpAudioStream: MediaStream | null = null
@@ -363,24 +399,94 @@ const getLanguageLabel = (code?: string) => {
   return languages[code || 'live'] || code || '🎙️ Live'
 }
 
+const getLanguageSummary = (preset: WindowPreset) => {
+  if (!preset.languages || preset.languages.length === 0) return 'No languages'
+  return preset.languages.map(l => getLanguageLabel(l.language)).join(', ')
+}
+
+const toggleLayerExpanded = (layerId: string) => {
+  if (expandedLayers.value.has(layerId)) {
+    expandedLayers.value.delete(layerId)
+  } else {
+    expandedLayers.value.add(layerId)
+  }
+}
+
+const createDefaultLayer = (language: string = 'live', positionY: number = 50): LanguageLayer => ({
+  id: Date.now().toString() + Math.random().toString(36).substring(2, 6),
+  language,
+  positionX: 50,
+  positionY,
+  fontSize: 48,
+  fontFamily: 'Arial',
+  textColor: '#FFFFFF',
+  maxLines: 4
+})
+
+const addLanguageLayer = () => {
+  if (!selectedPreset.value) return
+  const existingCount = selectedPreset.value.languages.length
+  // Stagger Y position: 30%, 50%, 70%, etc.
+  const yPosition = existingCount === 0 ? 50 : Math.min(30 + existingCount * 20, 90)
+  const newLayer = createDefaultLayer('live', yPosition)
+  selectedPreset.value.languages.push(newLayer)
+  expandedLayers.value.add(newLayer.id)
+}
+
+const removeLanguageLayer = (index: number) => {
+  if (!selectedPreset.value) return
+  const layer = selectedPreset.value.languages[index]
+  if (layer) expandedLayers.value.delete(layer.id)
+  selectedPreset.value.languages.splice(index, 1)
+}
+
 onUnmounted(() => {
   // Stop GCP if active
   stopGcpAudioCapture()
 })
 
 const loadPresets = async () => {
-  const saved = await window.ipcRenderer.invoke('get-project-state') as WindowPreset[]
+  const saved = await window.ipcRenderer.invoke('get-project-state') as any[]
   if (saved && saved.length > 0) {
-    // Migrate old presets to include position and language defaults
-    presets.value = saved.map(p => ({
-      ...p,
-      language: p.language ?? 'live',  // Default to live captions
-      style: {
-        ...p.style,
-        positionX: p.style.positionX ?? 50,  // Center by default
-        positionY: p.style.positionY ?? 50   // Center by default
+    // Migrate old presets: convert single language + style fields → languages[] array
+    presets.value = saved.map((p: any) => {
+      // Already migrated preset
+      if (Array.isArray(p.languages) && p.languages.length > 0) {
+        return {
+          ...p,
+          style: {
+            backgroundColor: p.style?.backgroundColor ?? '#00FF00',
+            textShadow: p.style?.textShadow ?? true,
+            justifyContent: p.style?.justifyContent ?? 'center',
+          }
+        } as WindowPreset
       }
-    }))
+      
+      // Legacy preset: migrate single language + style → languages[]
+      const migratedLayer: LanguageLayer = {
+        id: Date.now().toString() + Math.random().toString(36).substring(2, 6),
+        language: p.language ?? 'live',
+        positionX: p.style?.positionX ?? 50,
+        positionY: p.style?.positionY ?? 50,
+        fontSize: p.style?.fontSize ?? 48,
+        fontFamily: p.style?.fontFamily ?? 'Arial',
+        textColor: p.style?.textColor ?? '#FFFFFF',
+        maxLines: p.style?.maxLines ?? 4,
+      }
+      
+      return {
+        id: p.id,
+        name: p.name,
+        audioDeviceId: p.audioDeviceId,
+        targetDisplayId: p.targetDisplayId,
+        languages: [migratedLayer],
+        style: {
+          backgroundColor: p.style?.backgroundColor ?? '#00FF00',
+          textShadow: p.style?.textShadow ?? true,
+          justifyContent: p.style?.justifyContent ?? 'center',
+        }
+      } as WindowPreset
+    })
   }
 }
 
@@ -389,24 +495,20 @@ const savePresetsToDisk = async () => {
 }
 
 const createNewPreset = () => {
+  const defaultLayer = createDefaultLayer('live', 50)
   const newPreset: WindowPreset = {
     id: Date.now().toString(),
     name: `Preset ${presets.value.length + 1}`,
-    language: 'live',  // Default to no translation
+    languages: [defaultLayer],
     style: {
       backgroundColor: '#00FF00',
-      textColor: '#FFFFFF',
-      fontSize: 48,
-      fontFamily: 'Arial',
       textShadow: true,
-      maxLines: 4, // Increased default to prevent cutting off long sentences
       justifyContent: 'center',
-      positionX: 50,  // Center horizontally
-      positionY: 50   // Center vertically
     }
   }
   presets.value.push(newPreset)
   selectedPresetId.value = newPreset.id
+  expandedLayers.value.add(defaultLayer.id)
   savePresetsToDisk()
 }
 
@@ -447,11 +549,13 @@ const savePreset = async (_preset: WindowPreset) => {
 const updateLiveWindow = (preset: WindowPreset) => {
     // Convert reactive objects to plain objects for IPC serialization
     const plainStyle = JSON.parse(JSON.stringify(preset.style))
+    const plainLanguages = JSON.parse(JSON.stringify(preset.languages))
     
-    // Send style update
+    // Send style + languages update
     window.ipcRenderer.invoke('update-projection-settings', { 
       id: preset.id, 
       style: plainStyle,
+      languages: plainLanguages,
       title: preset.name
     })
     // Send audio update
@@ -482,10 +586,10 @@ const openWindow = async (preset: WindowPreset) => {
     })
     activeWindows.value.add(preset.id)
     
-    // Set language preference for this window
-    await window.ipcRenderer.invoke('set-window-language', {
+    // Set language layers for this window (multi-language)
+    await window.ipcRenderer.invoke('set-window-languages', {
       windowId: preset.id,
-      language: preset.language || 'live'
+      languages: JSON.parse(JSON.stringify(preset.languages))
     })
     
     // Position window if display target is set

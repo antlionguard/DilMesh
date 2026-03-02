@@ -1,67 +1,80 @@
 <template>
   <div class="fixed inset-0 w-screen h-screen -z-10 transition-colors duration-300 draggable-region" 
-       :style="{ backgroundColor: style.backgroundColor }">
+       :style="{ backgroundColor: sharedStyle.backgroundColor }">
   </div>
+  <!-- Render one positioned div per language layer -->
   <div 
+    v-for="layer in layers" 
+    :key="layer.id"
     class="fixed transition-all duration-300 draggable-region" 
-    :style="positionStyle"
+    :style="layerPositionStyle(layer)"
   >
-    <div class="text-center transition-all duration-300" :style="textStyle">
-      {{ currentText }}
+    <div class="text-center transition-all duration-300" :style="layerTextStyle(layer)">
+      {{ layerTexts[layer.id] || '' }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-
-const route = useRoute()
-
-const currentText = ref('Waiting for subtitles...')
-
-const style = ref({
-  backgroundColor: '#00FF00',
-  textColor: '#FFFFFF',
-  fontSize: 48,
-  fontFamily: 'Arial',
-  textShadow: true,
-  maxLines: 2,
-  justifyContent: 'center',
-  positionX: 50,
-  positionY: 50
-})
-
-defineProps<{ id: string }>()
 
 import { CSSProperties } from 'vue'
 
-const positionStyle = computed((): CSSProperties => ({
-  left: `${style.value.positionX}%`,
-  top: `${style.value.positionY}%`,
+interface LanguageLayer {
+  id: string
+  language: string
+  positionX: number
+  positionY: number
+  fontSize: number
+  fontFamily: string
+  textColor: string
+  maxLines: number
+}
+
+const route = useRoute()
+
+// Shared style (background, shadow, alignment)
+const sharedStyle = ref({
+  backgroundColor: '#00FF00',
+  textShadow: true,
+  justifyContent: 'center'
+})
+
+// Language layers with their individual settings
+const layers = ref<LanguageLayer[]>([])
+
+// Reactive text content per layer (layerId → text)
+const layerTexts = reactive<Record<string, string>>({})
+
+defineProps<{ id: string }>()
+
+const layerPositionStyle = (layer: LanguageLayer): CSSProperties => ({
+  left: `${layer.positionX}%`,
+  top: `${layer.positionY}%`,
   transform: 'translate(-50%, -50%)',
   width: '100vw',
   padding: '0 2vw',
   boxSizing: 'border-box',
   zIndex: 1000
-}))
+})
 
 // @ts-ignore
-const textStyle = computed((): CSSProperties => ({
-  color: style.value.textColor,
-  fontSize: `${style.value.fontSize}px`,
-  fontFamily: style.value.fontFamily,
-  textShadow: style.value.textShadow ? '2px 2px 4px rgba(0,0,0,0.8)' : 'none',
+const layerTextStyle = (layer: LanguageLayer): CSSProperties => ({
+  color: layer.textColor,
+  fontSize: `${layer.fontSize}px`,
+  fontFamily: layer.fontFamily,
+  textShadow: sharedStyle.value.textShadow ? '2px 2px 4px rgba(0,0,0,0.8)' : 'none',
   lineHeight: '1.2',
   display: 'flex',
   flexDirection: 'column',
   justifyContent: 'flex-end',
-  maxHeight: style.value.maxLines > 0 ? `${style.value.fontSize * 1.2 * style.value.maxLines}px` : 'unset',
+  maxHeight: layer.maxLines > 0 ? `${layer.fontSize * 1.2 * layer.maxLines}px` : 'unset',
   overflow: 'hidden',
   overflowWrap: 'break-word',
   wordBreak: 'break-word',
   whiteSpace: 'pre-wrap'
-} as CSSProperties))
+} as CSSProperties)
 
 
 onMounted(async () => {
@@ -69,18 +82,12 @@ onMounted(async () => {
     document.title = `${route.query.title} - DilMesh`
   }
 
-  // ── CPS Queue Player ────────────────────────────────────────────────────────
-  // Translated sentences are queued and shown one at a time. Display duration
-  // is calculated from character count using the Netflix-standard 17 CPS rate.
-  // Live-caption windows skip the queue and show captions in real time.
-  // ────────────────────────────────────────────────────────────────────────────
-
-  let cps = 17               // Characters Per Second (default: Netflix standard)
+  // ── CPS Queue Player — per-layer queues ──────────────────────────────────
+  let cps = 17
   const MIN_DISPLAY_MS = 1500
   const MAX_DISPLAY_MS = 7000
   const INACTIVITY_CLEAR_MS = 10_000
 
-  // Load settings on mount
   let queueMaxDepth = 0
   try {
     const s = await window.ipcRenderer.invoke('get-settings', 'transcription')
@@ -92,130 +99,210 @@ onMounted(async () => {
     }
   } catch { /* settings not available yet, fall back to defaults */ }
 
-  const sentenceQueue: { text: string, seq: number }[] = []
-  let displayTimer: ReturnType<typeof setTimeout> | null = null
-  let inactivityTimer: ReturnType<typeof setTimeout> | null = null
-  let isDisplaying = false
-  let isTranslationMode = false
+  // Per-layer queue state
+  interface LayerQueueState {
+    sentenceQueue: { text: string, seq: number }[]
+    displayTimer: ReturnType<typeof setTimeout> | null
+    inactivityTimer: ReturnType<typeof setTimeout> | null
+    isDisplaying: boolean
+    isTranslationMode: boolean
+  }
 
-  // Query this window's language preference on mount (the language-mode-updated
-  // event may have fired before this component mounted, so we need to check)
+  const layerQueues = new Map<string, LayerQueueState>()
+
+  function getOrCreateQueue(layerId: string, isTranslation: boolean): LayerQueueState {
+    if (!layerQueues.has(layerId)) {
+      layerQueues.set(layerId, {
+        sentenceQueue: [],
+        displayTimer: null,
+        inactivityTimer: null,
+        isDisplaying: false,
+        isTranslationMode: isTranslation
+      })
+    }
+    return layerQueues.get(layerId)!
+  }
+
+  // Initialize queues from current layers
+  function initLayerQueues() {
+    for (const layer of layers.value) {
+      const isTranslation = layer.language !== 'live'
+      getOrCreateQueue(layer.id, isTranslation)
+      if (!isTranslation) {
+        layerTexts[layer.id] = 'Waiting for subtitles...'
+      } else {
+        layerTexts[layer.id] = ''
+      }
+    }
+  }
+
+  // Query this window's language layers on mount
   try {
     const windowId = route.params.id as string
     if (windowId) {
-      const lang = await window.ipcRenderer.invoke('get-window-language', { windowId })
-      if (lang && lang !== 'live') {
-        isTranslationMode = true
-        currentText.value = ''  // clear "Waiting for subtitles..." placeholder
-        console.log(`[Projection] Initialized in translation mode (${lang})`)
+      const windowLayers = await window.ipcRenderer.invoke('get-window-languages', { windowId })
+      if (Array.isArray(windowLayers) && windowLayers.length > 0) {
+        layers.value = windowLayers
+        initLayerQueues()
+        console.log(`[Projection] Initialized with ${windowLayers.length} language layers`)
       }
     }
-  } catch { /* fallback to live mode */ }
-
-  // Hold timer for live mode is now handled via the queue — holdUntil removed.
+  } catch { /* fallback */ }
 
   function calcHoldMs(text: string): number {
     return Math.min(Math.max((text.length / cps) * 1000, MIN_DISPLAY_MS), MAX_DISPLAY_MS)
   }
 
-  function resetInactivityTimer() {
-    if (inactivityTimer) clearTimeout(inactivityTimer)
-    inactivityTimer = setTimeout(() => {
-      currentText.value = ''
-      isDisplaying = false
+  function resetInactivityTimer(layerId: string) {
+    const q = layerQueues.get(layerId)
+    if (!q) return
+    if (q.inactivityTimer) clearTimeout(q.inactivityTimer)
+    q.inactivityTimer = setTimeout(() => {
+      layerTexts[layerId] = ''
+      q.isDisplaying = false
     }, INACTIVITY_CLEAR_MS)
   }
 
-  function showNextFromQueue() {
-    if (sentenceQueue.length === 0) {
-      isDisplaying = false
-      resetInactivityTimer()
+  function showNextFromQueue(layerId: string) {
+    const q = layerQueues.get(layerId)
+    if (!q) return
+    if (q.sentenceQueue.length === 0) {
+      q.isDisplaying = false
+      resetInactivityTimer(layerId)
       return
     }
-    const entry = sentenceQueue.shift()!
-    currentText.value = entry.text
+    const entry = q.sentenceQueue.shift()!
+    layerTexts[layerId] = entry.text
     const holdMs = calcHoldMs(entry.text)
-    console.log(`[Projection] Showing [seq=${entry.seq}] for ${holdMs}ms: "${entry.text.substring(0, 40)}..."`)
-    displayTimer = setTimeout(showNextFromQueue, holdMs)
+    console.log(`[Projection] Layer ${layerId} showing [seq=${entry.seq}] for ${holdMs}ms: "${entry.text.substring(0, 40)}..."`)
+    q.displayTimer = setTimeout(() => showNextFromQueue(layerId), holdMs)
   }
 
-  // Insert into queue maintaining seq order (handles async translation race)
-  function insertOrdered(text: string, seq: number) {
+  function insertOrdered(queue: { text: string, seq: number }[], text: string, seq: number) {
     const entry = { text, seq }
-    // Fast path: seq is higher than everything — just append
-    if (sentenceQueue.length === 0 || seq > sentenceQueue[sentenceQueue.length - 1].seq) {
-      sentenceQueue.push(entry)
+    if (queue.length === 0 || seq > queue[queue.length - 1].seq) {
+      queue.push(entry)
     } else {
-      // Find correct position via binary search
-      let lo = 0, hi = sentenceQueue.length
+      let lo = 0, hi = queue.length
       while (lo < hi) {
         const mid = (lo + hi) >> 1
-        if (sentenceQueue[mid].seq < seq) lo = mid + 1
+        if (queue[mid].seq < seq) lo = mid + 1
         else hi = mid
       }
-      sentenceQueue.splice(lo, 0, entry)
+      queue.splice(lo, 0, entry)
     }
   }
 
-  // Listen for transcript updates from main process
+  // Listen for transcript updates with layerId targeting
   window.ipcRenderer.on('transcript-update', (_event, result: any) => {
+    const targetLayerId = result.layerId
 
-    if (!isTranslationMode) {
-      // ── LIVE MODE ──────────────────────────────────────────────────────────
-      // Live windows show raw interim text in real-time. No queue, no CPS.
-      // isSentence events are ignored — live mode is always showing the
-      // latest interim so users see what's being said right now.
-      if (!result.isSentence) {
-        currentText.value = result.text
-        resetInactivityTimer()
+    if (targetLayerId) {
+      // Targeted to a specific layer
+      const q = layerQueues.get(targetLayerId)
+      if (!q) return
+
+      if (!q.isTranslationMode) {
+        // Live mode for this layer
+        if (!result.isSentence) {
+          layerTexts[targetLayerId] = result.text
+          resetInactivityTimer(targetLayerId)
+        }
+        return
       }
-      return
-    }
 
-    // ── TRANSLATION MODE ───────────────────────────────────────────────────
-    // Translation windows ONLY process isSentence events.
-    // These are punctuation-triggered clauses that have already been
-    // translated in main.ts. They go into the CPS queue.
-    if (!result.isSentence) return  // ignore interim completely
+      // Translation mode for this layer
+      if (!result.isSentence) return
 
-    if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null }
+      if (q.inactivityTimer) { clearTimeout(q.inactivityTimer); q.inactivityTimer = null }
 
-    if (queueMaxDepth > 0 && sentenceQueue.length >= queueMaxDepth) {
-      console.warn(`[Subtitle Queue] Max depth (${queueMaxDepth}) reached, dropping oldest sentence`)
-      sentenceQueue.shift()
-    }
+      if (queueMaxDepth > 0 && q.sentenceQueue.length >= queueMaxDepth) {
+        q.sentenceQueue.shift()
+      }
 
-    insertOrdered(result.text, result.seq ?? Date.now())
+      insertOrdered(q.sentenceQueue, result.text, result.seq ?? Date.now())
 
-    if (!isDisplaying) {
-      isDisplaying = true
-      showNextFromQueue()
+      if (!q.isDisplaying) {
+        q.isDisplaying = true
+        showNextFromQueue(targetLayerId)
+      }
+    } else {
+      // Legacy: no layerId — send to all layers based on their mode
+      for (const [layerId, q] of layerQueues.entries()) {
+        if (!q.isTranslationMode) {
+          if (!result.isSentence) {
+            layerTexts[layerId] = result.text
+            resetInactivityTimer(layerId)
+          }
+        }
+      }
     }
   })
 
-  // Listen for language mode changes from main process
-  window.ipcRenderer.on('language-mode-updated', (_event, { language }: { language: string }) => {
-    const wasTranslation = isTranslationMode
-    isTranslationMode = language !== 'live'
-
-    if (wasTranslation !== isTranslationMode) {
-      // Clear queue and display when switching modes
-      sentenceQueue.length = 0
-      if (displayTimer) { clearTimeout(displayTimer); displayTimer = null }
-      isDisplaying = false
-      currentText.value = ''
+  // Listen for language layers update from main process
+  window.ipcRenderer.on('languages-updated', (_event, { languages }: { languages: LanguageLayer[] }) => {
+    // Clear old queues
+    for (const [, q] of layerQueues) {
+      if (q.displayTimer) clearTimeout(q.displayTimer)
+      if (q.inactivityTimer) clearTimeout(q.inactivityTimer)
     }
+    layerQueues.clear()
+
+    // Clear old texts
+    for (const key of Object.keys(layerTexts)) {
+      delete layerTexts[key]
+    }
+
+    layers.value = languages
+    initLayerQueues()
   })
 
   // Listen for style updates
   window.ipcRenderer.on('settings-updated', async (_event, settings: any) => {
     if (settings.style) {
-      style.value = settings.style
+      sharedStyle.value = settings.style
+    }
+    if (settings.languages) {
+      // Update layers with new settings from dashboard
+      layers.value = settings.languages
+
+      // Re-initialize queues for new layers
+      const existingQueueIds = new Set(layerQueues.keys())
+      for (const layer of layers.value) {
+        if (!existingQueueIds.has(layer.id)) {
+          const isTranslation = layer.language !== 'live'
+          getOrCreateQueue(layer.id, isTranslation)
+          layerTexts[layer.id] = isTranslation ? '' : 'Waiting for subtitles...'
+        } else {
+          // Update mode if language changed
+          const q = layerQueues.get(layer.id)!
+          const isTranslation = layer.language !== 'live'
+          if (q.isTranslationMode !== isTranslation) {
+            q.sentenceQueue.length = 0
+            if (q.displayTimer) { clearTimeout(q.displayTimer); q.displayTimer = null }
+            q.isDisplaying = false
+            q.isTranslationMode = isTranslation
+            layerTexts[layer.id] = ''
+          }
+        }
+      }
+
+      // Clean up removed layers
+      for (const oldId of existingQueueIds) {
+        if (!layers.value.find(l => l.id === oldId)) {
+          const q = layerQueues.get(oldId)
+          if (q) {
+            if (q.displayTimer) clearTimeout(q.displayTimer)
+            if (q.inactivityTimer) clearTimeout(q.inactivityTimer)
+          }
+          layerQueues.delete(oldId)
+          delete layerTexts[oldId]
+        }
+      }
     }
     if (settings.title) {
       document.title = `${settings.title} - DilMesh`
     }
-    // Update queue depth and CPS live if settings change
     if (typeof settings.subtitleQueueMaxDepth === 'number') {
       queueMaxDepth = settings.subtitleQueueMaxDepth
     }
@@ -228,7 +315,7 @@ onMounted(async () => {
 onUnmounted(() => {
   window.ipcRenderer.removeAllListeners('transcript-update')
   window.ipcRenderer.removeAllListeners('settings-updated')
-  window.ipcRenderer.removeAllListeners('language-mode-updated')
+  window.ipcRenderer.removeAllListeners('languages-updated')
 })
 </script>
 

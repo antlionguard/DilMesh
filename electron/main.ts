@@ -49,34 +49,51 @@ let rivaSpeechService: RivaSpeechService | null = null
 let deepgramSpeechService: DeepgramSpeechService | null = null
 let nllbTranslationService: NllbTranslationService | null = null
 
-// Per-window language preferences
-const windowLanguagePreferences = new Map<string, string>() // windowId -> language code ('live', 'en', 'tr', etc.)
+// Per-window language layers
+interface LanguageLayer {
+  id: string
+  language: string
+  positionX: number
+  positionY: number
+  fontSize: number
+  fontFamily: string
+  textColor: string
+  maxLines: number
+}
+
+const windowLanguageLayers = new Map<string, LanguageLayer[]>() // windowId -> language layers
 
 
-// Helper to broadcast to all projection windows with translation support
+// Helper to broadcast to all projection windows with per-layer translation support
 async function broadcastToProjectionWindows(channel: string, data: any) {
   for (const [windowId, win] of projectionWindows.entries()) {
-    if (!win.isDestroyed()) {
-      // Get language preference for this window
-      const language = windowLanguagePreferences.get(windowId) || 'live'
-      const isTranslationWindow = language !== 'live'
+    if (win.isDestroyed()) continue
 
-      // Translation windows: ONLY accept sentence-level events — never interim.
-      // This guarantees words don't flicker in real-time on translation projections.
-      if (channel === 'transcript-update' && isTranslationWindow && !data.isSentence) {
-        continue  // drop interim for translation windows
-      }
+    const layers = windowLanguageLayers.get(windowId) || []
 
-      // If it's a transcript update and translation is needed
-      if (channel === 'transcript-update' && isTranslationWindow && data.text && data.isSentence) {
-        // Skip if source matches target (e.g., tr -> tr-TR)
+    if (channel !== 'transcript-update') {
+      // Non-transcript channels: send as-is
+      win.webContents.send(channel, data)
+      continue
+    }
+
+    // For each language layer in this window, handle translation separately
+    for (const layer of layers) {
+      const isTranslationLayer = layer.language !== 'live'
+
+      // Translation layers: ONLY accept sentence-level events
+      if (isTranslationLayer && !data.isSentence) continue
+
+      if (isTranslationLayer && data.text && data.isSentence) {
+        // Skip if source matches target
         const sourceLang = (data.detectedLanguage || '').split('-')[0]
-        const targetLang = language.split('-')[0]
+        const targetLang = layer.language.split('-')[0]
 
         if (sourceLang && sourceLang === targetLang) {
-          win.webContents.send(channel, data)
+          win.webContents.send(channel, { ...data, layerId: layer.id })
           continue
         }
+
         // Determine translation provider
         let translationProvider = 'GCP'
         try {
@@ -86,56 +103,56 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
           }
         } catch { /* default to GCP */ }
 
-        console.log(`[Main] Window ${windowId} translation needed. Target: ${language}, Source: ${data.detectedLanguage}, Provider: ${translationProvider}`)
+        console.log(`[Main] Window ${windowId} layer ${layer.id} (${layer.language}) translation needed. Provider: ${translationProvider}`)
 
         try {
           let translatedText: string | null = null
 
           if (translationProvider === 'GCP' && gcpTranslationService && gcpTranslationService.isReady()) {
-            translatedText = await gcpTranslationService.translate(data.text, language, data.detectedLanguage)
+            translatedText = await gcpTranslationService.translate(data.text, layer.language, data.detectedLanguage)
           } else if (translationProvider === 'RIVA' && rivaSpeechService) {
-            translatedText = await rivaSpeechService.translate(data.text, language, data.detectedLanguage)
+            translatedText = await rivaSpeechService.translate(data.text, layer.language, data.detectedLanguage)
           } else if (translationProvider === 'NLLB' && nllbTranslationService) {
             if (nllbTranslationService.isReady()) {
-              translatedText = await nllbTranslationService.translate(data.text, language, data.detectedLanguage)
+              translatedText = await nllbTranslationService.translate(data.text, layer.language, data.detectedLanguage)
             } else {
-              console.warn(`[Main] NLLB translation service not initialized or model not downloaded yet.`)
+              console.warn(`[Main] NLLB translation service not initialized yet.`)
             }
           } else {
-            console.warn(`[Main] Translation service ${translationProvider} not ready for window ${windowId}`)
+            console.warn(`[Main] Translation service ${translationProvider} not ready for layer ${layer.id}`)
           }
 
           if (translatedText !== null) {
-            console.log(`[${translationProvider}] Translation result: "${translatedText}"`)
-            // Send translated version to this window
-            win.webContents.send(channel, { ...data, text: translatedText })
+            console.log(`[${translationProvider}] Layer ${layer.id} translation: "${translatedText}"`)
+            win.webContents.send(channel, { ...data, text: translatedText, layerId: layer.id })
           } else {
-            // No translation service ready, send original
-            win.webContents.send(channel, data)
+            win.webContents.send(channel, { ...data, layerId: layer.id })
           }
         } catch (error) {
-          console.error(`[${translationProvider}] Translation failed for window ${windowId}:`, error)
-          // Fallback to original text
-          win.webContents.send(channel, data)
+          console.error(`[${translationProvider}] Translation failed for layer ${layer.id}:`, error)
+          win.webContents.send(channel, { ...data, layerId: layer.id })
         }
-      } else {
-        // Live window or non-transcript channel — send as-is
-        win.webContents.send(channel, data)
+      } else if (!isTranslationLayer) {
+        // Live layer: handled by broadcastLiveCaption, skip here for sentences
+        // (sentences also sent to live layers for display)
+        if (data.isSentence) {
+          win.webContents.send(channel, { ...data, layerId: layer.id })
+        }
       }
     }
   }
 }
 
-// Broadcast interim (live) transcripts — only to windows in 'live' mode
+// Broadcast interim (live) transcripts — only to layers in 'live' mode
 function broadcastLiveCaption(data: any) {
   for (const [windowId, win] of projectionWindows.entries()) {
-    if (!win.isDestroyed()) {
-      const language = windowLanguagePreferences.get(windowId) || 'live'
-      if (language === 'live') {
-        win.webContents.send('transcript-update', data)
+    if (win.isDestroyed()) continue
+
+    const layers = windowLanguageLayers.get(windowId) || []
+    for (const layer of layers) {
+      if (layer.language === 'live') {
+        win.webContents.send('transcript-update', { ...data, layerId: layer.id })
       }
-      // Translation windows intentionally skip live captions to avoid
-      // showing raw source-language text before the translation arrives.
     }
   }
 }
@@ -620,7 +637,7 @@ app.whenReady().then(() => {
           click: () => {
             win.close()
             projectionWindows.delete(id)
-            windowLanguagePreferences.delete(id) // Clean up language preference
+            windowLanguageLayers.delete(id) // Clean up language layers
           }
         }
       ])
@@ -628,20 +645,47 @@ app.whenReady().then(() => {
     })
   })
 
-  // Handler to set window language preference
-  ipcMain.handle('set-window-language', (_, { windowId, language }) => {
-    windowLanguagePreferences.set(windowId, language)
-    console.log(`Window ${windowId} language set to: ${language}`)
-    // Notify the window itself so Projection.vue can update its display mode
+  // Handler to set window language layers (multi-language)
+  ipcMain.handle('set-window-languages', (_, { windowId, languages }) => {
+    windowLanguageLayers.set(windowId, languages)
+    console.log(`Window ${windowId} languages set: ${languages.map((l: LanguageLayer) => l.language).join(', ')}`)
+    // Notify the window itself so Projection.vue can update its layers
     const win = projectionWindows.get(windowId)
     if (win && !win.isDestroyed()) {
-      win.webContents.send('language-mode-updated', { language })
+      win.webContents.send('languages-updated', { languages })
     }
   })
 
-  // Handler to get window language preference
+  // Handler to get window language layers
+  ipcMain.handle('get-window-languages', (_, { windowId }) => {
+    return windowLanguageLayers.get(windowId) || []
+  })
+
+  // Legacy handler for backward compatibility
+  ipcMain.handle('set-window-language', (_, { windowId, language }) => {
+    // Convert single language to a single-layer array
+    const layer: LanguageLayer = {
+      id: 'legacy-' + windowId,
+      language: language,
+      positionX: 50,
+      positionY: 50,
+      fontSize: 48,
+      fontFamily: 'Arial',
+      textColor: '#FFFFFF',
+      maxLines: 4
+    }
+    windowLanguageLayers.set(windowId, [layer])
+    console.log(`Window ${windowId} language set (legacy): ${language}`)
+    const win = projectionWindows.get(windowId)
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('languages-updated', { languages: [layer] })
+    }
+  })
+
+  // Legacy handler
   ipcMain.handle('get-window-language', (_, { windowId }) => {
-    return windowLanguagePreferences.get(windowId) || 'live'
+    const layers = windowLanguageLayers.get(windowId) || []
+    return layers.length > 0 ? layers[0].language : 'live'
   })
 
   // Handler to update GCP credentials dynamically
