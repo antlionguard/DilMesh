@@ -210,18 +210,53 @@
                       <label class="block text-sm text-gray-400 mb-1">Language</label>
                       <select v-model="layer.language" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm">
                         <option value="live">🎙️ Live Captions (No Translation)</option>
+                        <option disabled>─── Common ───</option>
                         <option value="en">🇬🇧 English</option>
                         <option value="tr">🇹🇷 Turkish</option>
-                        <option value="es">🇪🇸 Spanish</option>
+                        <option value="de">�� German</option>
                         <option value="fr">🇫🇷 French</option>
-                        <option value="de">🇩🇪 German</option>
+                        <option value="es">🇸 Spanish</option>
                         <option value="it">🇮🇹 Italian</option>
                         <option value="pt">🇵🇹 Portuguese</option>
                         <option value="ru">🇷🇺 Russian</option>
+                        <option value="ar">🇸🇦 Arabic</option>
+                        <option disabled>─── Nordic ───</option>
+                        <option value="da">🇩🇰 Danish</option>
+                        <option value="sv">🇸🇪 Swedish</option>
+                        <option value="no">🇳🇴 Norwegian</option>
+                        <option value="fi">🇫🇮 Finnish</option>
+                        <option disabled>─── Eastern Europe ───</option>
+                        <option value="pl">🇵🇱 Polish</option>
+                        <option value="cs">🇨🇿 Czech</option>
+                        <option value="sk">🇸🇰 Slovak</option>
+                        <option value="hu">🇭🇺 Hungarian</option>
+                        <option value="ro">🇷🇴 Romanian</option>
+                        <option value="bg">🇧🇬 Bulgarian</option>
+                        <option value="hr">🇭🇷 Croatian</option>
+                        <option value="sr">🇷🇸 Serbian</option>
+                        <option value="sl">🇸🇮 Slovenian</option>
+                        <option value="uk">🇺🇦 Ukrainian</option>
+                        <option disabled>─── Western Europe ───</option>
+                        <option value="nl">🇳🇱 Dutch</option>
+                        <option value="el">🇬🇷 Greek</option>
+                        <option value="ca">🇪🇸 Catalan</option>
+                        <option disabled>─── Baltic ───</option>
+                        <option value="lv">🇱🇻 Latvian</option>
+                        <option value="lt">🇱🇹 Lithuanian</option>
+                        <option value="et">🇪🇪 Estonian</option>
+                        <option disabled>─── Asia ───</option>
                         <option value="ja">🇯🇵 Japanese</option>
                         <option value="ko">🇰🇷 Korean</option>
                         <option value="zh">🇨🇳 Chinese</option>
-                        <option value="ar">🇸🇦 Arabic</option>
+                        <option value="hi">🇮🇳 Hindi</option>
+                        <option value="th">🇹🇭 Thai</option>
+                        <option value="vi">🇻🇳 Vietnamese</option>
+                        <option value="id">🇮🇩 Indonesian</option>
+                        <option value="ms">🇲🇾 Malay</option>
+                        <option value="tl">🇵🇭 Filipino</option>
+                        <option disabled>─── Other ───</option>
+                        <option value="he">�� Hebrew</option>
+                        <option value="sw">🇰🇪 Swahili</option>
                       </select>
                     </div>
 
@@ -385,16 +420,44 @@ const getLanguageLabel = (code?: string) => {
     'live': '🎙️ Live',
     'en': '🇬🇧 English',
     'tr': '🇹🇷 Turkish',
-    'es': '🇪🇸 Spanish',
+    'de': '�� German',
     'fr': '🇫🇷 French',
-    'de': '🇩🇪 German',
+    'es': '🇸 Spanish',
     'it': '🇮🇹 Italian',
     'pt': '🇵🇹 Portuguese',
     'ru': '🇷🇺 Russian',
+    'ar': '🇸🇦 Arabic',
+    'da': '🇩🇰 Danish',
+    'sv': '🇸🇪 Swedish',
+    'no': '🇳🇴 Norwegian',
+    'fi': '🇫🇮 Finnish',
+    'pl': '🇵🇱 Polish',
+    'cs': '🇨🇿 Czech',
+    'sk': '🇸🇰 Slovak',
+    'hu': '🇭🇺 Hungarian',
+    'ro': '🇷🇴 Romanian',
+    'bg': '🇧🇬 Bulgarian',
+    'hr': '🇭🇷 Croatian',
+    'sr': '🇷🇸 Serbian',
+    'sl': '🇸🇮 Slovenian',
+    'uk': '🇺🇦 Ukrainian',
+    'nl': '🇳🇱 Dutch',
+    'el': '🇬🇷 Greek',
+    'ca': '🇪🇸 Catalan',
+    'lv': '🇱🇻 Latvian',
+    'lt': '🇱🇹 Lithuanian',
+    'et': '🇪🇪 Estonian',
     'ja': '🇯🇵 Japanese',
     'ko': '🇰🇷 Korean',
     'zh': '🇨🇳 Chinese',
-    'ar': '🇸🇦 Arabic',
+    'hi': '🇮🇳 Hindi',
+    'th': '🇹🇭 Thai',
+    'vi': '🇻🇳 Vietnamese',
+    'id': '🇮🇩 Indonesian',
+    'ms': '🇲🇾 Malay',
+    'tl': '🇵🇭 Filipino',
+    'he': '🇮🇱 Hebrew',
+    'sw': '�� Swahili',
   }
   return languages[code || 'live'] || code || '🎙️ Live'
 }
