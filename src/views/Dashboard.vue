@@ -247,7 +247,9 @@
                         <option disabled>─── Asia ───</option>
                         <option value="ja">🇯🇵 Japanese</option>
                         <option value="ko">🇰🇷 Korean</option>
-                        <option value="zh">🇨🇳 Chinese</option>
+                        <option value="zh">🇨🇳 Chinese (Simplified)</option>
+                        <option value="zh-TW">🇹🇼 Chinese (Traditional)</option>
+                        <option value="zh-HK">🇭🇰 Chinese (Cantonese)</option>
                         <option value="hi">🇮🇳 Hindi</option>
                         <option value="th">🇹🇭 Thai</option>
                         <option value="vi">🇻🇳 Vietnamese</option>
@@ -450,6 +452,8 @@ const getLanguageLabel = (code?: string) => {
     'ja': '🇯🇵 Japanese',
     'ko': '🇰🇷 Korean',
     'zh': '🇨🇳 Chinese',
+    'zh-TW': '🇹🇼 Chinese (TW)',
+    'zh-HK': '🇭🇰 Cantonese',
     'hi': '🇮🇳 Hindi',
     'th': '🇹🇭 Thai',
     'vi': '🇻🇳 Vietnamese',

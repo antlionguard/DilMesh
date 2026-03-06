@@ -69,19 +69,30 @@
           </div>
           <div>
             <label class="block text-sm text-gray-400 mb-2">Recognition Languages</label>
-            <div class="space-y-2 bg-gray-800 border border-gray-600 rounded px-3 py-2">
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" value="tr" v-model="settings.recognitionLanguages" class="w-4 h-4 rounded border-gray-600 text-blue-500" />
-                <span class="text-sm text-white">Turkish (tr-TR)</span>
-              </label>
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" value="en" v-model="settings.recognitionLanguages" class="w-4 h-4 rounded border-gray-600 text-blue-500" />
-                <span class="text-sm text-white">English (en-US)</span>
-              </label>
+            <!-- Selected language tags -->
+            <div class="flex flex-wrap gap-2 mb-2" v-if="settings.recognitionLanguages.length > 0">
+              <span v-for="lang in settings.recognitionLanguages" :key="lang"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-blue-600/20 border border-blue-500/40 text-blue-300 transition-all hover:bg-blue-600/30">
+                {{ getRecognitionLanguageLabel(lang) }}
+                <button @click="removeRecognitionLanguage(lang)" class="ml-0.5 text-blue-400 hover:text-red-400 transition-colors font-bold text-xs leading-none">×</button>
+              </span>
             </div>
+            <div v-else class="text-sm text-gray-500 italic mb-2">No languages selected — add at least one.</div>
+            <!-- Dropdown to add more -->
+            <select @change="addRecognitionLanguage($event)" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm">
+              <option value="" selected disabled>+ Add language…</option>
+              <optgroup label="🌍 Auto Detect">
+                <option value="multi" :disabled="settings.recognitionLanguages.includes('multi')">Multi (Auto Detect)</option>
+              </optgroup>
+              <optgroup label="Languages">
+                <option v-for="l in deepgramLanguages" :key="l.code" :value="l.code" :disabled="settings.recognitionLanguages.includes(l.code)">
+                  {{ l.flag }} {{ l.name }}
+                </option>
+              </optgroup>
+            </select>
             <p class="text-xs text-blue-400 mt-2">
-              Select languages that might be spoken. For GCP, parallel streams run for each language.
-              <br/><span class="text-yellow-500/80">⚠️ Multiple languages = more API usage.</span>
+              Each language opens a parallel STT stream. 
+              <br/><span class="text-yellow-500/80">⚠️ More languages = more API usage & cost.</span>
             </p>
           </div>
         </div>
@@ -722,51 +733,56 @@ const sherpaModels = [
 ]
 
 const deepgramLanguages = [
-  { code: 'en', name: 'English' },
-  { code: 'en-US', name: 'English (US)' },
-  { code: 'en-GB', name: 'English (UK)' },
-  { code: 'en-AU', name: 'English (AU)' },
-  { code: 'tr', name: 'Turkish' },
-  { code: 'de', name: 'German' },
-  { code: 'fr', name: 'French' },
-  { code: 'es', name: 'Spanish' },
-  { code: 'pt', name: 'Portuguese' },
-  { code: 'pt-BR', name: 'Portuguese (Brazil)' },
-  { code: 'it', name: 'Italian' },
-  { code: 'nl', name: 'Dutch' },
-  { code: 'ja', name: 'Japanese' },
-  { code: 'ko', name: 'Korean' },
-  { code: 'zh', name: 'Chinese' },
-  { code: 'hi', name: 'Hindi' },
-  { code: 'ar', name: 'Arabic' },
-  { code: 'ru', name: 'Russian' },
-  { code: 'pl', name: 'Polish' },
-  { code: 'sv', name: 'Swedish' },
-  { code: 'da', name: 'Danish' },
-  { code: 'fi', name: 'Finnish' },
-  { code: 'no', name: 'Norwegian' },
-  { code: 'uk', name: 'Ukrainian' },
-  { code: 'cs', name: 'Czech' },
-  { code: 'el', name: 'Greek' },
-  { code: 'ro', name: 'Romanian' },
-  { code: 'hu', name: 'Hungarian' },
-  { code: 'id', name: 'Indonesian' },
-  { code: 'ms', name: 'Malay' },
-  { code: 'th', name: 'Thai' },
-  { code: 'vi', name: 'Vietnamese' },
-  { code: 'bg', name: 'Bulgarian' },
-  { code: 'hr', name: 'Croatian' },
-  { code: 'sk', name: 'Slovak' },
-  { code: 'sl', name: 'Slovenian' },
-  { code: 'sr', name: 'Serbian' },
-  { code: 'ca', name: 'Catalan' },
-  { code: 'eu', name: 'Basque' },
-  { code: 'gl', name: 'Galician' },
-  { code: 'lt', name: 'Lithuanian' },
-  { code: 'lv', name: 'Latvian' },
-  { code: 'et', name: 'Estonian' },
-  { code: 'tl', name: 'Tagalog' },
-  { code: 'sw', name: 'Swahili' },
+  { code: 'en', name: 'English', flag: '🇬🇧' },
+  { code: 'en-US', name: 'English (US)', flag: '🇺🇸' },
+  { code: 'en-GB', name: 'English (UK)', flag: '🇬🇧' },
+  { code: 'en-AU', name: 'English (AU)', flag: '🇦🇺' },
+  { code: 'tr', name: 'Turkish', flag: '🇹🇷' },
+  { code: 'de', name: 'German', flag: '🇩🇪' },
+  { code: 'de-CH', name: 'German (Swiss)', flag: '🇨🇭' },
+  { code: 'fr', name: 'French', flag: '🇫🇷' },
+  { code: 'fr-CA', name: 'French (Canada)', flag: '🇨🇦' },
+  { code: 'es', name: 'Spanish', flag: '🇪🇸' },
+  { code: 'es-419', name: 'Spanish (LATAM)', flag: '🇲🇽' },
+  { code: 'pt', name: 'Portuguese', flag: '🇵🇹' },
+  { code: 'pt-BR', name: 'Portuguese (Brazil)', flag: '🇧🇷' },
+  { code: 'pt-PT', name: 'Portuguese (Portugal)', flag: '🇵🇹' },
+  { code: 'it', name: 'Italian', flag: '🇮🇹' },
+  { code: 'nl', name: 'Dutch', flag: '🇳🇱' },
+  { code: 'nl-BE', name: 'Flemish', flag: '🇧🇪' },
+  { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
+  { code: 'ko', name: 'Korean', flag: '🇰🇷' },
+  { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
+  { code: 'hi', name: 'Hindi', flag: '🇮🇳' },
+  { code: 'ar', name: 'Arabic', flag: '🇸🇦' },
+  { code: 'ru', name: 'Russian', flag: '🇷🇺' },
+  { code: 'pl', name: 'Polish', flag: '🇵🇱' },
+  { code: 'sv', name: 'Swedish', flag: '🇸🇪' },
+  { code: 'da', name: 'Danish', flag: '🇩🇰' },
+  { code: 'fi', name: 'Finnish', flag: '🇫🇮' },
+  { code: 'no', name: 'Norwegian', flag: '🇳🇴' },
+  { code: 'uk', name: 'Ukrainian', flag: '🇺🇦' },
+  { code: 'cs', name: 'Czech', flag: '🇨🇿' },
+  { code: 'el', name: 'Greek', flag: '🇬🇷' },
+  { code: 'ro', name: 'Romanian', flag: '🇷🇴' },
+  { code: 'hu', name: 'Hungarian', flag: '🇭🇺' },
+  { code: 'id', name: 'Indonesian', flag: '🇮🇩' },
+  { code: 'ms', name: 'Malay', flag: '🇲🇾' },
+  { code: 'th', name: 'Thai', flag: '🇹🇭' },
+  { code: 'vi', name: 'Vietnamese', flag: '🇻🇳' },
+  { code: 'bg', name: 'Bulgarian', flag: '🇧🇬' },
+  { code: 'hr', name: 'Croatian', flag: '🇭🇷' },
+  { code: 'sk', name: 'Slovak', flag: '🇸🇰' },
+  { code: 'sl', name: 'Slovenian', flag: '🇸🇮' },
+  { code: 'sr', name: 'Serbian', flag: '🇷🇸' },
+  { code: 'ca', name: 'Catalan', flag: '🇪🇸' },
+  { code: 'eu', name: 'Basque', flag: '🇪🇸' },
+  { code: 'gl', name: 'Galician', flag: '🇪🇸' },
+  { code: 'lt', name: 'Lithuanian', flag: '🇱🇹' },
+  { code: 'lv', name: 'Latvian', flag: '🇱🇻' },
+  { code: 'et', name: 'Estonian', flag: '🇪🇪' },
+  { code: 'tl', name: 'Tagalog', flag: '🇵🇭' },
+  { code: 'sw', name: 'Swahili', flag: '🇰🇪' },
 ]
 
 const punctuationOptions = [
@@ -787,6 +803,27 @@ const togglePunctuation = (char: string) => {
   } else {
     arr.push(char)
   }
+}
+
+// Recognition language tag helpers
+const getRecognitionLanguageLabel = (code: string) => {
+  if (code === 'multi') return '🌍 Multi (Auto)'
+  const lang = deepgramLanguages.find(l => l.code === code)
+  return lang ? `${lang.flag} ${lang.name}` : code
+}
+
+const addRecognitionLanguage = (event: Event) => {
+  const select = event.target as HTMLSelectElement
+  const code = select.value
+  if (code && !settings.value.recognitionLanguages.includes(code)) {
+    settings.value.recognitionLanguages.push(code)
+  }
+  // Reset dropdown to placeholder
+  select.value = ''
+}
+
+const removeRecognitionLanguage = (code: string) => {
+  settings.value.recognitionLanguages = settings.value.recognitionLanguages.filter(l => l !== code)
 }
 
 const getAudioDevices = async () => {
