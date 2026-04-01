@@ -772,6 +772,7 @@ const deepgramLanguages = [
   { code: 'vi', name: 'Vietnamese', flag: '🇻🇳' },
   { code: 'bg', name: 'Bulgarian', flag: '🇧🇬' },
   { code: 'hr', name: 'Croatian', flag: '🇭🇷' },
+  { code: 'mk', name: 'Macedonian', flag: '🇲🇰' },
   { code: 'sk', name: 'Slovak', flag: '🇸🇰' },
   { code: 'sl', name: 'Slovenian', flag: '🇸🇮' },
   { code: 'sr', name: 'Serbian', flag: '🇷🇸' },

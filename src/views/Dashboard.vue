@@ -235,6 +235,7 @@
                         <option value="hr">🇭🇷 Croatian</option>
                         <option value="sr">🇷🇸 Serbian</option>
                         <option value="sl">🇸🇮 Slovenian</option>
+                        <option value="mk">🇲🇰 Macedonian</option>
                         <option value="uk">🇺🇦 Ukrainian</option>
                         <option disabled>─── Western Europe ───</option>
                         <option value="nl">🇳🇱 Dutch</option>
@@ -442,6 +443,7 @@ const getLanguageLabel = (code?: string) => {
     'hr': '🇭🇷 Croatian',
     'sr': '🇷🇸 Serbian',
     'sl': '🇸🇮 Slovenian',
+    'mk': '🇲🇰 Macedonian',
     'uk': '🇺🇦 Ukrainian',
     'nl': '🇳🇱 Dutch',
     'el': '🇬🇷 Greek',
