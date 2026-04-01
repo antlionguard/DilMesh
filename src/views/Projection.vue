@@ -30,6 +30,7 @@ interface LanguageLayer {
   fontFamily: string
   textColor: string
   maxLines: number
+  maxWidth: number   // px, 0 = unlimited (100vw)
 }
 
 const route = useRoute()
@@ -53,8 +54,9 @@ const layerPositionStyle = (layer: LanguageLayer): CSSProperties => ({
   left: `${layer.positionX}%`,
   top: `${layer.positionY}%`,
   transform: 'translate(-50%, -50%)',
-  width: '100vw',
-  padding: '0 2vw',
+  width: layer.maxWidth > 0 ? `${layer.maxWidth}px` : '100vw',
+  maxWidth: layer.maxWidth > 0 ? `${layer.maxWidth}px` : '100vw',
+  padding: layer.maxWidth > 0 ? '0 8px' : '0 2vw',
   boxSizing: 'border-box',
   zIndex: 1000
 })

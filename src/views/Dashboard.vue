@@ -314,6 +314,13 @@
                       <label class="block text-sm text-gray-400 mb-1">Max Lines (0 = Unlimited)</label>
                       <input v-model.number="layer.maxLines" type="number" min="0" max="10" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm" />
                     </div>
+
+                    <!-- Max Width -->
+                    <div>
+                      <label class="block text-sm text-gray-400 mb-1">Max Width px <span class="text-gray-500">(0 = full screen)</span></label>
+                      <input v-model.number="layer.maxWidth" type="number" min="0" step="50" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm" placeholder="e.g. 1920" />
+                      <p class="text-xs text-gray-500 mt-1">Yan yana diller için piksel genişliği sınırla. 0 = ekran genişliği.</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -343,6 +350,7 @@ interface LanguageLayer {
   fontFamily: string
   textColor: string
   maxLines: number
+  maxWidth: number          // px, 0 = unlimited (full screen width)
 }
 
 interface WindowStyle {
@@ -489,7 +497,8 @@ const createDefaultLayer = (language: string = 'live', positionY: number = 50): 
   fontSize: 48,
   fontFamily: 'Arial',
   textColor: '#FFFFFF',
-  maxLines: 4
+  maxLines: 4,
+  maxWidth: 0,
 })
 
 const addLanguageLayer = () => {
@@ -541,6 +550,7 @@ const loadPresets = async () => {
         fontFamily: p.style?.fontFamily ?? 'Arial',
         textColor: p.style?.textColor ?? '#FFFFFF',
         maxLines: p.style?.maxLines ?? 4,
+        maxWidth: p.style?.maxWidth ?? 0,
       }
       
       return {
