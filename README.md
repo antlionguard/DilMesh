@@ -10,7 +10,7 @@
 DilMesh is a powerful desktop application that provides real-time speech-to-text and instant translation, capable of broadcasting subtitles to multiple windows simultaneously. It's designed for streamers, presenters, conference organizers, and anyone needing accessible, multilingual communication on the fly.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.3.0-brightgreen)](https://github.com/antlionguard/dilmesh/releases)
+[![Version](https://img.shields.io/badge/version-2.3.1-brightgreen)](https://github.com/antlionguard/dilmesh/releases)
 [![Electron](https://img.shields.io/badge/Electron-30.0.1-blue?logo=electron)](https://www.electronjs.org/)
 [![Vue 3](https://img.shields.io/badge/Vue.js-3.4.21-4FC08D?logo=vue.js)](https://vuejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.2.2-3178C6?logo=typescript)](https://www.typescriptlang.org/)

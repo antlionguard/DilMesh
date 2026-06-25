@@ -776,6 +776,39 @@ app.whenReady().then(() => {
     obsServer?.broadcastConfig(id, { style, layers: languages || [] })
   })
 
+  // ── Preset export / import ────────────────────────────────────────────────
+  ipcMain.handle('export-presets', async (_, presets: any) => {
+    const result = await dialog.showSaveDialog({
+      title: 'Export Presets',
+      defaultPath: 'dilmesh-presets.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (result.canceled || !result.filePath) return { ok: false }
+    try {
+      await fs.promises.writeFile(result.filePath, JSON.stringify(presets, null, 2), 'utf-8')
+      return { ok: true, path: result.filePath }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || 'Write failed' }
+    }
+  })
+
+  ipcMain.handle('import-presets', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Import Presets',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (result.canceled || result.filePaths.length === 0) return { ok: false }
+    try {
+      const raw = await fs.promises.readFile(result.filePaths[0], 'utf-8')
+      const data = JSON.parse(raw)
+      const presets = Array.isArray(data) ? data : (data?.presets || [])
+      return { ok: true, presets }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || 'Invalid JSON file' }
+    }
+  })
+
   // ── OBS overlay URL ───────────────────────────────────────────────────────
   ipcMain.handle('get-obs-url', (_, { presetId }: { presetId: string }) => {
     const port = obsServer?.getPort() ?? 3456

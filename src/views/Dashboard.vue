@@ -23,6 +23,12 @@
         <button @click="$router.push('/settings')" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2">
           <span>⚙️</span> Settings
         </button>
+        <button @click="importPresets" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2" title="Import presets from a JSON file">
+          <span>📥</span> Import
+        </button>
+        <button @click="exportPresets" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2" title="Export all presets to a JSON file">
+          <span>📤</span> Export
+        </button>
         <button @click="createNewPreset" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
           + New Preset
         </button>
@@ -446,6 +452,7 @@
                         <option value="id">🇮🇩 Indonesian</option>
                         <option value="ms">🇲🇾 Malay</option>
                         <option value="tl">🇵🇭 Filipino</option>
+                        <option value="kk">🇰🇿 Kazakh</option>
                         <option disabled>─── Other ───</option>
                         <option value="he">�� Hebrew</option>
                         <option value="sw">🇰🇪 Swahili</option>
@@ -562,6 +569,9 @@ interface WindowPreset {
   style: WindowStyle
   outputWidth?: number   // reference output resolution (px) for grid math & preview
   outputHeight?: number
+  gridColumns?: number   // Auto Grid settings (persisted per preset)
+  gridRows?: number      // 0 = auto
+  gridGap?: number
 }
 
 const presets = ref<WindowPreset[]>([])
@@ -584,11 +594,20 @@ const selectedPreset = computed(() => presets.value.find(p => p.id === selectedP
 // Background image preview URL (file://) for the selected preset
 const bgImageUrl = ref<string | null>(null)
 
-// Auto Grid inputs
-const gridColumns = ref(4)
-const gridRows = ref(0)   // 0 = auto (ceil(count / columns))
-const gridGap = ref(10)
-const showGridLines = ref(true)  // overlay cell borders on the preview
+// Auto Grid inputs — backed by the selected preset so they persist on save
+const gridColumns = computed({
+  get: () => selectedPreset.value?.gridColumns ?? 4,
+  set: (v) => { if (selectedPreset.value) selectedPreset.value.gridColumns = v }
+})
+const gridRows = computed({
+  get: () => selectedPreset.value?.gridRows ?? 0,   // 0 = auto (ceil(count / columns))
+  set: (v) => { if (selectedPreset.value) selectedPreset.value.gridRows = v }
+})
+const gridGap = computed({
+  get: () => selectedPreset.value?.gridGap ?? 10,
+  set: (v) => { if (selectedPreset.value) selectedPreset.value.gridGap = v }
+})
+const showGridLines = ref(true)  // overlay cell borders on the preview (UI-only)
 
 // Bulk style applied to all language layers at once
 const bulk = ref({ fontSize: 48, fontFamily: 'Arial', textColor: '#FFFFFF', maxLines: 4 })
@@ -707,6 +726,7 @@ const getLanguageLabel = (code?: string) => {
     'id': '🇮🇩 Indonesian',
     'ms': '🇲🇾 Malay',
     'tl': '🇵🇭 Filipino',
+    'kk': '🇰🇿 Kazakh',
     'he': '🇮🇱 Hebrew',
     'sw': '�� Swahili',
   }
@@ -812,6 +832,49 @@ const loadPresets = async () => {
 
 const savePresetsToDisk = async () => {
   await window.ipcRenderer.invoke('save-project-state', JSON.parse(JSON.stringify(presets.value)))
+}
+
+// Export all presets to a JSON file (for transfer to another machine)
+const exportPresets = async () => {
+  const res = await window.ipcRenderer.invoke('export-presets', JSON.parse(JSON.stringify(presets.value)))
+  if (res?.ok) {
+    alert(`Exported ${presets.value.length} preset(s) to:\n${res.path}`)
+  } else if (res?.error) {
+    alert(`Export failed: ${res.error}`)
+  }
+}
+
+// Import presets from a JSON file (appended with fresh ids so nothing is overwritten)
+const importPresets = async () => {
+  const res = await window.ipcRenderer.invoke('import-presets')
+  if (!res?.ok) {
+    if (res?.error) alert(`Import failed: ${res.error}`)
+    return
+  }
+  const incoming = (res.presets || []) as any[]
+  let added = 0
+  for (const p of incoming) {
+    if (!p || !Array.isArray(p.languages)) continue
+    const newPreset: WindowPreset = {
+      ...p,
+      id: Date.now().toString() + Math.random().toString(36).substring(2, 6),
+      name: p.name || `Imported ${presets.value.length + 1}`,
+      style: {
+        backgroundColor: p.style?.backgroundColor ?? '#00FF00',
+        textShadow: p.style?.textShadow ?? true,
+        justifyContent: p.style?.justifyContent ?? 'center',
+        backgroundImage: p.style?.backgroundImage,
+        backgroundOpacity: p.style?.backgroundOpacity ?? 1,
+      },
+    }
+    presets.value.push(newPreset)
+    added++
+  }
+  if (added > 0) {
+    selectedPresetId.value = presets.value[presets.value.length - 1].id
+    savePresetsToDisk()
+  }
+  alert(`${added} preset(s) imported.`)
 }
 
 const createNewPreset = () => {

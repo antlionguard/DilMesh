@@ -483,27 +483,9 @@
         <!-- DeepL Settings -->
         <div v-if="settings.translationProvider === 'DEEPL'" class="p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
           <h3 class="text-lg font-medium mb-3 text-sky-400">🌊 DeepL</h3>
-          <p class="text-xs text-gray-500 mb-3">High-quality translation. Free tier: 500K chars/month. Free keys end with <span class="font-mono">:fx</span> and auto-route to the free API.</p>
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">API Key</label>
-            <input
-              v-model="settings.deeplApiKey"
-              type="password"
-              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
-              class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm font-mono"
-            />
-          </div>
-          <div class="mt-3">
-            <label class="block text-sm text-gray-400 mb-1">API URL <span class="text-gray-600">(optional override)</span></label>
-            <input
-              v-model="settings.deeplApiUrl"
-              type="text"
-              placeholder="auto (api-free.deepl.com / api.deepl.com)"
-              class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm font-mono"
-            />
-          </div>
-          <div class="bg-sky-900/20 border border-sky-500/30 rounded p-3 mt-3 text-xs text-sky-200">
-            <p>💡 Unsupported target languages fall back to the original text. DeepL supports ~30 languages (EN, TR, DE, FR, ES, IT, JA, ZH, RU, AR, …).</p>
+          <p class="text-xs text-gray-500 mb-2">Enter your DeepL API key in the <button @click="activeTab = 'api'" class="text-sky-400 underline">API Integrations</button> tab.</p>
+          <div class="bg-sky-900/20 border border-sky-500/30 rounded p-3 text-xs text-sky-200">
+            <p>💡 High-quality translation, 500K chars/month free. Unsupported target languages fall back to the original text. DeepL supports ~30 languages (EN, TR, DE, FR, ES, IT, JA, ZH, RU, AR, …).</p>
           </div>
         </div>
 
@@ -624,6 +606,22 @@
           <div>
             <label class="block text-sm text-gray-400 mb-1">API Key</label>
             <input v-model="settings.deepgramApiKey" type="password" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 font-mono text-xs" placeholder="Enter your Deepgram API key" />
+          </div>
+        </div>
+
+        <!-- DeepL -->
+        <div class="p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
+          <h3 class="text-lg font-medium mb-3 text-sky-400">🌊 DeepL</h3>
+          <p class="text-xs text-gray-500 mb-3">Get a free key at <a href="https://www.deepl.com/pro-api" target="_blank" class="text-sky-400 underline">deepl.com/pro-api</a> (500K chars/month). Free keys end with <span class="font-mono">:fx</span> and auto-route to the free API.</p>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-sm text-gray-400 mb-1">API Key</label>
+              <input v-model="settings.deeplApiKey" type="password" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 font-mono text-xs" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx" />
+            </div>
+            <div>
+              <label class="block text-sm text-gray-400 mb-1">API URL <span class="text-gray-600">(optional override)</span></label>
+              <input v-model="settings.deeplApiUrl" type="text" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 font-mono text-xs" placeholder="auto (api-free.deepl.com / api.deepl.com)" />
+            </div>
           </div>
         </div>
 
@@ -1067,8 +1065,8 @@ const saveSettings = async () => {
     })
   }
 
-  // Update live pipeline settings
-  window.ipcRenderer.send('update-sentence-split-chars', settings.value.sentenceSplitChars)
+  // Update live pipeline settings (clone the reactive array — a Vue proxy can't be structured-cloned over IPC)
+  window.ipcRenderer.send('update-sentence-split-chars', JSON.parse(JSON.stringify(settings.value.sentenceSplitChars)))
   await window.ipcRenderer.invoke('set-active-stt-provider', settings.value.sttProvider)
 
   alert('Settings saved!')
