@@ -312,8 +312,8 @@ function renderOverlayHtml(presetId: string, wsPort: number): string {
   var cps = 17;
   var queueMaxDepth = 0;
   var MIN_DISPLAY_MS = 1500;
-  var MAX_DISPLAY_MS = 7000;
   var INACTIVITY_CLEAR_MS = 10000;
+  var POST_QUEUE_CLEAR_MS = 1000;
 
   var sharedStyle = { backgroundColor: '#00FF00', textShadow: true, justifyContent: 'center' };
   var layers = [];
@@ -356,8 +356,10 @@ function renderOverlayHtml(presetId: string, wsPort: number): string {
     var q = queues[layerId];
     if (!q) return;
     if (q.sentenceQueue.length === 0) {
+      // CPS hold finished with nothing queued: hold briefly, then blank
       q.isDisplaying = false;
-      resetInactivityTimer(layerId);
+      if (q.inactivityTimer) clearTimeout(q.inactivityTimer);
+      q.inactivityTimer = setTimeout(function () { setText(layerId, ''); }, POST_QUEUE_CLEAR_MS);
       return;
     }
     var entry = q.sentenceQueue.shift();
@@ -446,7 +448,17 @@ function renderOverlayHtml(presetId: string, wsPort: number): string {
     if (!q) return;
 
     if (!q.isTranslationMode) {
-      if (!result.isSentence) {
+      // Live (source) layer: queue finalized sentences (Deepgram has no interim);
+      // show interim as a preview only while the queue isn't pacing something.
+      if (result.isSentence) {
+        if (q.inactivityTimer) { clearTimeout(q.inactivityTimer); q.inactivityTimer = null; }
+        if (queueMaxDepth > 0 && q.sentenceQueue.length >= queueMaxDepth) q.sentenceQueue.shift();
+        insertOrdered(q.sentenceQueue, result.text, (result.seq != null) ? result.seq : Date.now());
+        if (!q.isDisplaying) {
+          q.isDisplaying = true;
+          showNextFromQueue(layerId);
+        }
+      } else if (!q.isDisplaying) {
         setText(layerId, result.text);
         resetInactivityTimer(layerId);
       }

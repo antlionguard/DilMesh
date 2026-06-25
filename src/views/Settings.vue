@@ -461,22 +461,38 @@
           <h3 class="text-lg font-medium mb-3 text-pink-400">🧠 NLLB-200 (Offline)</h3>
           <p class="text-xs text-gray-500 mb-4">Meta's NLLB-200 model — 200 languages, runs 100% offline after download.</p>
 
+          <div class="mb-4">
+            <label class="block text-sm text-gray-400 mb-1">Model</label>
+            <select v-model="settings.nllbModelId" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm">
+              <option v-for="m in nllbModelOptions" :key="m.id" :value="m.id">{{ m.name }} ({{ m.size }}) — {{ m.note }}</option>
+            </select>
+          </div>
+
           <div class="flex items-center justify-between p-3 bg-gray-800 rounded border border-gray-700 mb-4">
             <div>
-              <div class="font-medium text-white text-sm">NLLB-200 Distilled 600M</div>
-              <div class="text-xs text-gray-500">~800MB download, ONNX quantized</div>
+              <div class="font-medium text-white text-sm">{{ settings.nllbModelId }}</div>
+              <div class="text-xs text-gray-500">ONNX q8 · downloads to your machine, runs offline</div>
             </div>
             <div class="flex items-center gap-2">
               <span v-if="nllbDownloaded" class="text-green-500 text-xs font-bold px-2 py-1 bg-green-900/30 rounded">✓ Ready</span>
               <button v-if="nllbDownloaded" @click.stop="deleteNllbModel" class="text-xs bg-red-600 hover:bg-red-500 text-white px-2 py-1 rounded transition-colors">🗑️</button>
               <button v-else @click.stop="downloadNllbModel" :disabled="!!isDownloadingNllb" class="text-xs bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 text-white px-2 py-1 rounded transition-colors">
-                {{ isDownloadingNllb ? '⏳ Downloading...' : '⬇️ Download' }}
+                {{ isDownloadingNllb ? '⏳ Downloading…' : '⬇️ Download' }}
               </button>
             </div>
           </div>
 
-          <div class="bg-pink-900/20 border border-pink-500/30 rounded p-3 text-xs text-pink-200">
-            <p>💡 Click download to fetch the ONNX model (~800MB). It will stay on your PC and run securely offline.</p>
+          <div class="mt-4">
+            <label class="block text-sm text-gray-400 mb-1">Translation Quality (beam search): {{ settings.nllbNumBeams }} {{ settings.nllbNumBeams <= 1 ? '(fastest, lowest quality)' : settings.nllbNumBeams >= 6 ? '(best quality, slowest)' : '' }}</label>
+            <div class="flex items-center gap-4">
+              <input type="range" v-model.number="settings.nllbNumBeams" min="1" max="8" step="1" class="flex-1" />
+              <input type="number" v-model.number="settings.nllbNumBeams" min="1" max="8" step="1" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-center text-sm" />
+            </div>
+            <p class="text-xs text-pink-300 mt-1">Higher = noticeably better translations but slower (beam search). 1 = greedy (fast). 5 is a good balance for offline NLLB. Takes effect on the next sentence.</p>
+          </div>
+
+          <div class="bg-pink-900/20 border border-pink-500/30 rounded p-3 text-xs text-pink-200 mt-4">
+            <p>💡 Pick a model and click Download — it's fetched once and runs offline. The 1.3B model translates noticeably better but is larger (~1.3GB) and slower on CPU/WASM. Switching models takes effect on the next transcription start.</p>
           </div>
         </div>
 
@@ -509,6 +525,15 @@
               <input type="number" v-model.number="settings.subtitleCPS" min="5" max="30" step="1" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-center text-sm" />
             </div>
             <p class="text-xs text-blue-400 mt-1">Characters Per Second. Netflix standard: 17. Lower = longer display.</p>
+          </div>
+
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Max Sentences per Subtitle: {{ settings.subtitleMaxSentences <= 1 ? '1 (each sentence shown immediately)' : settings.subtitleMaxSentences }}</label>
+            <div class="flex items-center gap-4">
+              <input type="range" v-model.number="settings.subtitleMaxSentences" min="1" max="6" step="1" class="flex-1" />
+              <input type="number" v-model.number="settings.subtitleMaxSentences" min="1" max="6" step="1" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-center text-sm" />
+            </div>
+            <p class="text-xs text-blue-400 mt-1">Each completed sentence is shown as soon as it's finished (never waits for a pause) — this prevents 4-5 line pile-ups during continuous speech. The value only groups sentences when several finish at the exact same moment (1 = always one sentence). Applies to all STT providers.</p>
           </div>
 
           <div>
@@ -661,7 +686,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 const activeTab = ref<'stt' | 'translation' | 'api'>('stt')
 
@@ -736,6 +761,9 @@ const settings = ref({
   // Subtitle display
   subtitleQueueMaxDepth: 0,
   subtitleCPS: 17,
+  subtitleMaxSentences: 1,
+  nllbNumBeams: 5,
+  nllbModelId: 'Xenova/nllb-200-distilled-600M',
   sentenceSplitChars: ['.', '!', '?', '…'],
   // Sherpa-ONNX
   sherpaModel: '',
@@ -780,7 +808,12 @@ const settings = ref({
 
 const downloadedWhisperModels = ref<string[]>([])
 const downloadedSherpaModels = ref<string[]>([])
-const nllbDownloaded = ref(false)
+const nllbModelOptions = [
+  { id: 'Xenova/nllb-200-distilled-600M', name: 'Distilled 600M', size: '~800MB', note: 'Faster · lower quality' },
+  { id: 'Xenova/nllb-200-distilled-1.3B', name: 'Distilled 1.3B', size: '~1.3GB', note: 'Better quality · slower (WASM CPU)' },
+]
+const downloadedNllbModels = ref<string[]>([])
+const nllbDownloaded = computed(() => downloadedNllbModels.value.includes(settings.value.nllbModelId))
 const downloadingModel = ref<string | null>(null)
 const audioDevices = ref<MediaDeviceInfo[]>([])
 
@@ -954,8 +987,8 @@ const refreshAllModels = async () => {
   
   try {
     const nllb = await window.ipcRenderer.invoke('get-nllb-models')
-    nllbDownloaded.value = nllb && nllb.length > 0
-  } catch { nllbDownloaded.value = false }
+    downloadedNllbModels.value = Array.isArray(nllb) ? nllb : []
+  } catch { downloadedNllbModels.value = [] }
 }
 
 // Whisper model management
@@ -1021,12 +1054,14 @@ const downloadNllbModel = async () => {
   if (isDownloadingNllb.value) return
   isDownloadingNllb.value = true
   try {
-    const success = await window.ipcRenderer.invoke('initialize-nllb')
+    // Persist the selected model first so the worker downloads the right one
+    await window.ipcRenderer.invoke('set-settings', 'transcription', JSON.parse(JSON.stringify(settings.value)))
+    const success = await window.ipcRenderer.invoke('initialize-nllb', true)
+    await refreshAllModels()
     if (success) {
-      nllbDownloaded.value = true
-      alert('NLLB-200 model downloaded and initialized successfully!')
+      alert(`NLLB model "${settings.value.nllbModelId}" downloaded and ready!`)
     } else {
-      alert('Failed to download NLLB-200. Check console for details.')
+      alert('Failed to download NLLB model. Check console for details.')
     }
   } catch (error: any) {
     console.error('Failed to download NLLB:', error)
@@ -1037,11 +1072,11 @@ const downloadNllbModel = async () => {
 }
 
 const deleteNllbModel = async () => {
-  if (!confirm('Delete NLLB-200 downloaded model?')) return
+  if (!confirm(`Delete downloaded model "${settings.value.nllbModelId}"?`)) return
   try {
-    await window.ipcRenderer.invoke('delete-nllb-model')
-    nllbDownloaded.value = false
-    alert('NLLB-200 model deleted.')
+    await window.ipcRenderer.invoke('delete-nllb-model', settings.value.nllbModelId)
+    await refreshAllModels()
+    alert('NLLB model deleted.')
   } catch (error) {
     console.error('Failed to delete NLLB model:', error)
     alert('Failed to delete model.')

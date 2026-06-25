@@ -118,10 +118,20 @@ function resolveStyleForTarget(windowId: string): any {
   return undefined
 }
 
-// The set of broadcast targets: open Electron windows ∪ presets with OBS clients.
+// Presets the user has toggled OFF — excluded from all broadcasting/translation so
+// they don't burn STT/translation credits while unused.
+const disabledPresets = new Set<string>()
+
+// The set of broadcast targets: open Electron windows ∪ presets with OBS clients,
+// minus any preset that's been disabled.
 function broadcastTargetIds(): Set<string> {
-  const ids = new Set<string>(projectionWindows.keys())
-  for (const id of obsServer?.getSubscribedPresetIds() || []) ids.add(id)
+  const ids = new Set<string>()
+  for (const id of projectionWindows.keys()) {
+    if (!disabledPresets.has(id)) ids.add(id)
+  }
+  for (const id of obsServer?.getSubscribedPresetIds() || []) {
+    if (!disabledPresets.has(id)) ids.add(id)
+  }
   return ids
 }
 
@@ -175,21 +185,19 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
           } else if (translationProvider === 'RIVA' && rivaSpeechService) {
             translatedText = await rivaSpeechService.translate(data.text, layer.language, data.detectedLanguage)
           } else if (translationProvider === 'NLLB' && nllbTranslationService) {
-            if (nllbTranslationService.isReady()) {
-              translatedText = await nllbTranslationService.translate(data.text, layer.language, data.detectedLanguage)
-            } else {
-              console.warn(`[Main] NLLB translation service not initialized yet.`)
-            }
+            // translate() self-heals (lazy re-load) and falls back to the original text on failure
+            translatedText = await nllbTranslationService.translate(data.text, layer.language, data.detectedLanguage)
           } else if (translationProvider === 'DEEPL' && deeplTranslationService && deeplTranslationService.isReady()) {
             translatedText = await deeplTranslationService.translate(data.text, layer.language, data.detectedLanguage)
           } else {
             console.warn(`[Main] Translation service ${translationProvider} not ready for layer ${layer.id}`)
           }
 
-          if (translatedText !== null) {
+          if (translatedText !== null && translatedText.trim().length > 0) {
             console.log(`[${translationProvider}] Layer ${layer.id} translation: "${translatedText}"`)
             sendTranscript(win, windowId, { ...data, text: translatedText, layerId: layer.id })
           } else {
+            // Translation failed or came back empty — fall back to the original text
             sendTranscript(win, windowId, { ...data, layerId: layer.id })
           }
         } catch (error) {
@@ -359,6 +367,15 @@ app.whenReady().then(() => {
 
   setupStoreHandlers()
   ensureBackgroundsDir()
+
+  // Restore disabled-preset state from the persisted project so unused presets stay off
+  try {
+    const presets: any[] = (store.get('project-state') as any[]) || []
+    for (const p of presets) {
+      if (p && p.enabled === false) disabledPresets.add(p.id)
+    }
+  } catch { /* ignore */ }
+
   createTray()
   createMainWindow()
 
@@ -426,22 +443,24 @@ app.whenReady().then(() => {
   ipcMain.handle('set-active-stt-provider', async (_, provider: string) => {
     console.log(`[Main] Switching STT provider: ${activeSTTProvider} → ${provider}`)
     activeSTTProvider = provider
+    resetSentenceBuffer()
     return true
   })
 
-  // ── Shared punctuation-detection pipeline ─────────────────────────────────
-  // All STT providers feed into this. It detects punctuation in interim results,
-  // slices clauses, and broadcasts them as isSentence=true for translation.
-  let translatedCharCount = 0
-  let lastInterimLanguage = ''
+  // ── Shared sentence-assembly pipeline ─────────────────────────────────────
+  // Providers that emit incremental finalized text (GCP / Sherpa / Riva / Whisper)
+  // feed into a buffer here: their finals are accumulated, split into complete
+  // sentences by the configured punctuation, and flushed as N-sentence blocks
+  // (subtitleMaxSentences) — so continuous speech never piles up 4-5+ lines.
+  // Deepgram is excluded: it already assembles N-sentence blocks in-service using
+  // its own native endpointing (best quality), so its finals pass straight through.
   let sentenceSeq = 0
-  const MIN_CLAUSE_LENGTH = 8    // ignore tiny fragments
 
-  // Build regex from settings — chars like . ! ? need escaping
-  function buildPunctRegex(chars: string[]): RegExp {
-    if (!chars || chars.length === 0) return /[.!?…]/g
+  // Sentence-boundary regex (one-or-more of the configured punctuation chars)
+  function buildSentenceSplitRegex(chars: string[]): RegExp {
+    if (!chars || chars.length === 0) return /[.!?…]+/g
     const escaped = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('')
-    return new RegExp(`[${escaped}]`, 'g')
+    return new RegExp(`[${escaped}]+`, 'g')
   }
 
   let splitChars: string[] = ['.', '!', '?', '…']
@@ -451,80 +470,111 @@ app.whenReady().then(() => {
       splitChars = s.sentenceSplitChars
     }
   } catch { /* defaults */ }
-  let punctRe = buildPunctRegex(splitChars)
+  let sentenceSplitRe = buildSentenceSplitRegex(splitChars)
 
-  // Live update when settings are saved
   ipcMain.on('update-sentence-split-chars', (_, chars: string[]) => {
     splitChars = chars
-    punctRe = buildPunctRegex(chars)
+    sentenceSplitRe = buildSentenceSplitRegex(chars)
     console.log(`[Main] Sentence split chars updated: ${chars.join(' ')}`)
   })
 
-  function findLastPunctIndex(text: string, afterPos: number): number {
-    let lastIdx = -1
-    punctRe.lastIndex = 0
+  // Split text into complete sentences + a trailing incomplete remainder
+  function splitIntoSentences(text: string): { sentences: string[]; remainder: string } {
+    const sentences: string[] = []
+    let start = 0
+    sentenceSplitRe.lastIndex = 0
     let m: RegExpExecArray | null
-    while ((m = punctRe.exec(text)) !== null) {
-      if (m.index >= afterPos) lastIdx = m.index
+    while ((m = sentenceSplitRe.exec(text)) !== null) {
+      const end = m.index + m[0].length
+      const s = text.slice(start, end).trim()
+      if (s) sentences.push(s)
+      start = end
     }
-    return lastIdx
+    const remainder = text.slice(start).trim()
+    return { sentences, remainder }
+  }
+
+  function getMaxSentences(): number {
+    try {
+      const s: any = store.get('transcription')
+      if (typeof s?.subtitleMaxSentences === 'number') return s.subtitleMaxSentences
+    } catch { /* default */ }
+    return 1
+  }
+
+  function emitSentence(text: string, lang: string, provider: string) {
+    const seq = ++sentenceSeq
+    console.log(`[Main] Sentence flush [seq=${seq}] (${provider}/${lang}): "${text.substring(0, 60)}"`)
+    void broadcastToProjectionWindows('transcript-update', {
+      provider, text, isFinal: true, isSentence: true, detectedLanguage: lang, seq
+    })
+  }
+
+  // Unified buffer for non-Deepgram providers
+  let finalBuffer = ''
+  let finalBufferLang = ''
+  let sentenceIdleTimer: ReturnType<typeof setTimeout> | null = null
+  const SENTENCE_IDLE_FLUSH_MS = 1200   // flush the tail if no new final arrives (a pause)
+
+  function flushSentenceRemainder(provider: string) {
+    if (sentenceIdleTimer) { clearTimeout(sentenceIdleTimer); sentenceIdleTimer = null }
+    const rem = finalBuffer.trim()
+    if (rem) emitSentence(rem, finalBufferLang, provider)
+    finalBuffer = ''
+  }
+
+  function feedFinalText(text: string, lang: string, provider: string) {
+    finalBufferLang = lang
+    finalBuffer = finalBuffer ? `${finalBuffer} ${text}` : text
+
+    const maxSentences = Math.max(1, getMaxSentences())
+    const { sentences, remainder } = splitIntoSentences(finalBuffer)
+
+    // Flush every complete sentence immediately (grouped up to maxSentences) — never
+    // wait for more; a finished sentence reaches the screen right away.
+    while (sentences.length > 0) {
+      const block = sentences.splice(0, maxSentences).join(' ')
+      emitSentence(block, lang, provider)
+    }
+
+    finalBuffer = remainder
+
+    if (sentenceIdleTimer) clearTimeout(sentenceIdleTimer)
+    if (finalBuffer.trim()) {
+      sentenceIdleTimer = setTimeout(() => flushSentenceRemainder(provider), SENTENCE_IDLE_FLUSH_MS)
+    }
+  }
+
+  function resetSentenceBuffer() {
+    if (sentenceIdleTimer) { clearTimeout(sentenceIdleTimer); sentenceIdleTimer = null }
+    finalBuffer = ''
+    finalBufferLang = ''
   }
 
   function handleTranscriptResult(result: any, provider: string) {
+    const lang = result.detectedLanguage || result.language || ''
+
+    // Interim → live captions only (no sentence assembly from non-final text)
     if (!result.isFinal) {
-      // Send live captions to 'live' windows
       broadcastLiveCaption({ ...result, provider, isSentence: false })
-
-      // Reset char counter if language flipped
-      const lang = result.detectedLanguage || result.language || ''
-      if (lang !== lastInterimLanguage) {
-        if (lastInterimLanguage) {
-          console.log(`[Main] Language flip ${lastInterimLanguage} → ${lang}, resetting char counter`)
-        }
-        translatedCharCount = 0
-        lastInterimLanguage = lang
-      }
-
-      // Check for new punctuation in growing interim text
-      const text = result.text || ''
-      const punctIdx = findLastPunctIndex(text, translatedCharCount)
-
-      if (punctIdx >= 0) {
-        const clause = text.substring(translatedCharCount, punctIdx + 1).trim()
-        if (clause.length >= MIN_CLAUSE_LENGTH) {
-          translatedCharCount = punctIdx + 1
-          const seq = ++sentenceSeq
-          console.log(`[Main] Interim punct → translating (${lang}) [seq=${seq}]: "${clause}"`)
-          void broadcastToProjectionWindows('transcript-update', {
-            provider,
-            text: clause,
-            isFinal: false,
-            confidence: result.confidence,
-            detectedLanguage: lang,
-            isSentence: true,
-            seq
-          })
-        }
-      }
       return
     }
 
-    // Final result: flush any remaining untranslated suffix
-    const finalText = (result.text || '').trim()
-    const remaining = finalText.substring(translatedCharCount).trim()
-    translatedCharCount = 0  // reset for next utterance
+    const text = (result.text || '').trim()
+    if (!text) return
 
-    if (remaining.length > 0) {
+    if (provider === 'DEEPGRAM') {
+      // Deepgram already emits N-sentence blocks assembled in-service — pass through
       const seq = ++sentenceSeq
-      console.log(`[Main] Final flush remaining [seq=${seq}]: "${remaining}"`)
+      console.log(`[Main] Deepgram block [seq=${seq}]: "${text.substring(0, 60)}"`)
       void broadcastToProjectionWindows('transcript-update', {
-        ...result,
-        provider,
-        text: remaining,
-        isSentence: true,
-        seq
+        ...result, provider, text, isSentence: true, seq
       })
+      return
     }
+
+    // All other providers: accumulate finals and flush N-sentence blocks
+    feedFinalText(text, lang, provider)
   }
 
   // ── Initialize Silero VAD ─────────────────────────────────────────────────
@@ -774,6 +824,14 @@ app.whenReady().then(() => {
   // Electron projection window is open (Dashboard calls this on every edit).
   ipcMain.handle('push-obs-config', (_, { id, style, languages }: { id: string, style?: any, languages?: any[] }) => {
     obsServer?.broadcastConfig(id, { style, layers: languages || [] })
+  })
+
+  // Enable/disable a preset. Disabled presets are excluded from all broadcasting and
+  // translation so they don't consume STT/translation credits while unused.
+  ipcMain.handle('set-preset-enabled', (_, { id, enabled }: { id: string, enabled: boolean }) => {
+    if (enabled) disabledPresets.delete(id)
+    else disabledPresets.add(id)
+    console.log(`[Main] Preset ${id} ${enabled ? 'enabled' : 'disabled'}`)
   })
 
   // ── Preset export / import ────────────────────────────────────────────────

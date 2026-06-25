@@ -43,12 +43,22 @@
           :key="preset.id" 
           @click="selectPreset(preset)"
           class="bg-gray-800 rounded-xl p-4 border cursor-pointer transition-all duration-200 relative group"
-          :class="selectedPresetId === preset.id ? 'border-blue-500 bg-gray-750 shadow-lg shadow-blue-500/10' : 'border-gray-700 hover:border-gray-600'"
+          :class="[selectedPresetId === preset.id ? 'border-blue-500 bg-gray-750 shadow-lg shadow-blue-500/10' : 'border-gray-700 hover:border-gray-600', preset.enabled === false ? 'opacity-60' : '']"
         >
           <div class="flex justify-between items-start mb-3">
             <div class="flex items-center gap-2">
+              <!-- Enable/disable switch — disabled presets do no STT/translation (no credit use) -->
+              <button
+                @click.stop="togglePresetEnabled(preset)"
+                :class="preset.enabled !== false ? 'bg-green-500' : 'bg-gray-600'"
+                class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-none"
+                :title="preset.enabled !== false ? 'Enabled — click to disable (stops translation)' : 'Disabled — click to enable'"
+              >
+                <span :class="preset.enabled !== false ? 'translate-x-[18px]' : 'translate-x-0.5'" class="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform"></span>
+              </button>
               <h3 class="font-bold text-lg text-white group-hover:text-blue-200 transition-colors">{{ preset.name }}</h3>
               <span v-if="activeWindows.has(preset.id)" class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+              <span v-if="preset.enabled === false" class="text-[10px] text-gray-500 uppercase tracking-wide font-bold">Off</span>
             </div>
             
             <div class="flex gap-1">
@@ -572,6 +582,7 @@ interface WindowPreset {
   gridColumns?: number   // Auto Grid settings (persisted per preset)
   gridRows?: number      // 0 = auto
   gridGap?: number
+  enabled?: boolean      // false = no STT/translation for this preset (default true)
 }
 
 const presets = ref<WindowPreset[]>([])
@@ -647,7 +658,12 @@ onMounted(async () => {
   navigator.mediaDevices.ondevicechange = getAudioDevices
   await getDisplays()
   await loadPresets()
-  
+
+  // Sync each preset's enabled/disabled state to the main process
+  for (const p of presets.value) {
+    window.ipcRenderer.invoke('set-preset-enabled', { id: p.id, enabled: p.enabled !== false })
+  }
+
   // Sync active windows
   const activeIds = await window.ipcRenderer.invoke('get-active-windows')
   activeWindows.value = new Set(activeIds)
@@ -958,6 +974,18 @@ const updateObsConfig = (preset: WindowPreset) => {
     style: JSON.parse(JSON.stringify(preset.style)),
     languages: JSON.parse(JSON.stringify(preset.languages))
   })
+}
+
+// Enable/disable a preset. Disabled = excluded from STT/translation broadcasting
+// (no credit/token use). Disabling also closes its open window so nothing keeps running.
+const togglePresetEnabled = async (preset: WindowPreset) => {
+  const enabled = !(preset.enabled !== false)  // currently-enabled (true/undefined) → false
+  preset.enabled = enabled
+  savePresetsToDisk()
+  await window.ipcRenderer.invoke('set-preset-enabled', { id: preset.id, enabled })
+  if (!enabled && activeWindows.value.has(preset.id)) {
+    await closeWindow(preset.id)
+  }
 }
 
 const bringToFront = async (id: string) => {
@@ -1334,6 +1362,7 @@ const toggleTranscription = async () => {
         deepgramEncoding: settings?.deepgramEncoding || 'linear16',
         deepgramFillerWords: settings?.deepgramFillerWords ?? false,
         deepgramKeywords: settings?.deepgramKeywords || '',
+        deepgramMaxSentences: settings?.subtitleMaxSentences ?? 1,
       })
       await startDeepgramAudioCapture()
       isTranscribing.value = true

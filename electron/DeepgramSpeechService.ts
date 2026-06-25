@@ -19,6 +19,7 @@ interface DeepgramConfig {
     deepgramSampleRate?: number
     deepgramFillerWords?: boolean
     deepgramKeywords?: string
+    deepgramMaxSentences?: number   // flush after N complete sentences without waiting for a pause (0 = disabled)
 }
 
 interface LanguageStream {
@@ -260,10 +261,58 @@ export class DeepgramSpeechService extends EventEmitter {
             `(conf: ${confidence.toFixed(3)}, speech_final: ${speechFinal}, buffer: ${stream.sentenceBuffer.length} parts)`
         )
 
-        // speech_final: true → speaker paused, flush the buffer as a complete sentence
+        // Count-based flush: don't wait for a pause. Once the buffer holds N complete
+        // sentences, flush them immediately as ONE block so the screen never piles up
+        // 4-5+ lines during continuous speech. Only for a single recognition stream
+        // (multi-stream source detection still relies on the end-of-utterance best-pick).
+        const maxSentences = Math.max(1, this.currentConfig.deepgramMaxSentences ?? 1)
+        if (this.languageStreams.size <= 1) {
+            const joined = stream.sentenceBuffer.join(' ')
+            const { sentences, remainder } = this.splitSentences(joined)
+            // Flush EVERY complete sentence immediately (grouped up to maxSentences),
+            // never waiting for the next one — a finished sentence must hit the screen now.
+            while (sentences.length > 0) {
+                const block = sentences.splice(0, maxSentences).join(' ')
+                this.emitChunk(language, block, confidence)
+            }
+            // Only the incomplete tail stays buffered (flushed later on speech_final/UtteranceEnd)
+            stream.sentenceBuffer = remainder ? [remainder] : []
+        }
+
+        // speech_final: true → speaker paused, flush whatever remains as a complete sentence
         if (speechFinal) {
             this.flushSentenceBuffer(language)
         }
+    }
+
+    /** Split text into complete sentences (by sentence-ending punctuation) plus a trailing incomplete remainder. */
+    private splitSentences(text: string): { sentences: string[]; remainder: string } {
+        const sentences: string[] = []
+        const re = /[^.!?…。！？]*[.!?…。！？]+/g
+        let lastIndex = 0
+        let m: RegExpExecArray | null
+        while ((m = re.exec(text)) !== null) {
+            const s = m[0].trim()
+            if (s) sentences.push(s)
+            lastIndex = re.lastIndex
+        }
+        const remainder = text.slice(lastIndex).trim()
+        return { sentences, remainder }
+    }
+
+    /** Emit a finalized block immediately (single-stream path — no cross-stream debounce, so nothing is lost). */
+    private emitChunk(language: string, text: string, confidence: number): void {
+        if (!text.trim()) return
+        this.dominantLanguage = language
+        this.lastResultTime = Date.now()
+        console.log(`[Deepgram] ✅ block (${language}, ${this.currentConfig.deepgramMaxSentences ?? 2} sentences): "${text.substring(0, 60)}..."`)
+        this.emit('transcript', {
+            provider: 'DEEPGRAM',
+            text,
+            isFinal: true,
+            confidence,
+            detectedLanguage: language,
+        })
     }
 
     /**

@@ -91,8 +91,8 @@ export class ModelService {
         ipcMain.handle('get-nllb-models', async () => {
             return this.scanNllbModels()
         })
-        ipcMain.handle('delete-nllb-model', async () => {
-            return this.deleteNllbModels()
+        ipcMain.handle('delete-nllb-model', async (_, modelId?: string) => {
+            return this.deleteNllbModels(modelId)
         })
     }
 
@@ -249,30 +249,44 @@ export class ModelService {
     //  NLLB MODELS (tracked, downloaded by transformers.js)
     // ═══════════════════════════════════════════════════════════════════════
 
+    private static readonly NLLB_MODEL_IDS = [
+        'Xenova/nllb-200-distilled-600M',
+        'Xenova/nllb-200-distilled-1.3B',
+    ]
+
+    // Returns the full HF ids of NLLB models present on disk (q8 encoder file as the marker)
     async scanNllbModels(): Promise<string[]> {
         try {
-            // NLLB models are managed by transformers.js cache
-            // We just check if the cache directory exists with model files
-            if (!fs.existsSync(this.nllbModelsDir)) {
-                return []
-            }
-            // Simple existence check — detailed validation in NllbTranslationService
-            const contents = fs.readdirSync(this.nllbModelsDir)
-            if (contents.length > 0) {
-                return ['nllb-200-distilled-600M']
-            }
-            return []
+            if (!fs.existsSync(this.nllbModelsDir)) return []
+            return ModelService.NLLB_MODEL_IDS.filter(id => {
+                const encoder = path.join(this.nllbModelsDir, id, 'onnx', 'encoder_model_quantized.onnx')
+                return fs.existsSync(encoder)
+            })
         } catch (error) {
             console.error('Failed to scan NLLB models:', error)
             return []
         }
     }
 
-    async deleteNllbModels(): Promise<boolean> {
+    // Delete a specific model (by full HF id), or the whole NLLB cache if none given
+    async deleteNllbModels(modelId?: string): Promise<boolean> {
         try {
-            if (fs.existsSync(this.nllbModelsDir)) {
-                fs.rmSync(this.nllbModelsDir, { recursive: true, force: true })
-                console.log(`[ModelService] Deleted NLLB cache at ${this.nllbModelsDir}`)
+            // Only allow known model ids (prevents path traversal / arbitrary deletion)
+            if (modelId !== undefined && !ModelService.NLLB_MODEL_IDS.includes(modelId)) {
+                console.warn('[ModelService] Rejected delete for unknown modelId:', modelId)
+                return false
+            }
+            const target = modelId ? path.join(this.nllbModelsDir, modelId) : this.nllbModelsDir
+            // Defense in depth: ensure the resolved path stays inside the NLLB cache dir
+            const base = path.resolve(this.nllbModelsDir)
+            const resolved = path.resolve(target)
+            if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+                console.warn('[ModelService] Rejected delete outside NLLB dir:', resolved)
+                return false
+            }
+            if (fs.existsSync(target)) {
+                fs.rmSync(target, { recursive: true, force: true })
+                console.log(`[ModelService] Deleted NLLB model at ${target}`)
                 return true
             }
             return false

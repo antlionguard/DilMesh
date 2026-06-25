@@ -125,8 +125,11 @@ onMounted(async () => {
   // ── CPS Queue Player — per-layer queues ──────────────────────────────────
   let cps = 17
   const MIN_DISPLAY_MS = 1500
-  const MAX_DISPLAY_MS = 7000
+  // No upper display cap: a block is bounded to N sentences, and CPS controls reading
+  // speed — capping would make multi-sentence blocks vanish before they're read.
   const INACTIVITY_CLEAR_MS = 10_000
+  // After a sentence's CPS hold ends with an empty queue, keep it this long then blank
+  const POST_QUEUE_CLEAR_MS = 1000
 
   let queueMaxDepth = 0
   try {
@@ -190,7 +193,7 @@ onMounted(async () => {
   } catch { /* fallback */ }
 
   function calcHoldMs(text: string): number {
-    return Math.min(Math.max((text.length / cps) * 1000, MIN_DISPLAY_MS), MAX_DISPLAY_MS)
+    return Math.max((text.length / cps) * 1000, MIN_DISPLAY_MS)
   }
 
   function resetInactivityTimer(layerId: string) {
@@ -207,8 +210,12 @@ onMounted(async () => {
     const q = layerQueues.get(layerId)
     if (!q) return
     if (q.sentenceQueue.length === 0) {
+      // CPS hold finished and nothing is queued: hold the current text briefly,
+      // then blank it. A new sentence arriving within this window cancels the clear
+      // (the transcript handler clears inactivityTimer before enqueuing).
       q.isDisplaying = false
-      resetInactivityTimer(layerId)
+      if (q.inactivityTimer) clearTimeout(q.inactivityTimer)
+      q.inactivityTimer = setTimeout(() => { layerTexts[layerId] = '' }, POST_QUEUE_CLEAR_MS)
       return
     }
     const entry = q.sentenceQueue.shift()!
@@ -243,8 +250,20 @@ onMounted(async () => {
       if (!q) return
 
       if (!q.isTranslationMode) {
-        // Live mode for this layer
-        if (!result.isSentence) {
+        // Live (source) layer: queue finalized sentences with CPS pacing — Deepgram
+        // has no interim, so finals are all we get. Show interim as a live preview
+        // only while the queue isn't actively pacing something.
+        if (result.isSentence) {
+          if (q.inactivityTimer) { clearTimeout(q.inactivityTimer); q.inactivityTimer = null }
+          if (queueMaxDepth > 0 && q.sentenceQueue.length >= queueMaxDepth) {
+            q.sentenceQueue.shift()
+          }
+          insertOrdered(q.sentenceQueue, result.text, result.seq ?? Date.now())
+          if (!q.isDisplaying) {
+            q.isDisplaying = true
+            showNextFromQueue(targetLayerId)
+          }
+        } else if (!q.isDisplaying) {
           layerTexts[targetLayerId] = result.text
           resetInactivityTimer(targetLayerId)
         }

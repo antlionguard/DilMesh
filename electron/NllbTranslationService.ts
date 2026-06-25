@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { utilityProcess, UtilityProcess } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { store } from './store'
 
 // Needed to get dirname in ES modules
 const __filename = fileURLToPath(import.meta.url)
@@ -16,9 +17,21 @@ export class NllbTranslationService {
     private worker: UtilityProcess | null = null
     private cache: TranslationCache = {}
     private isLoaded: boolean = false
-    private isLoading: boolean = false
     private translateCallbacks: Map<string, { resolve: (val: string) => void, reject: (err: any) => void }> = new Map()
     private initCallback: { resolve: (val: boolean) => void, reject: (err: any) => void } | null = null
+    private initPromise: Promise<boolean> | null = null
+    private lastFailTime: number = 0
+    private loadedModelId: string | null = null
+    private static readonly RETRY_COOLDOWN_MS = 30000  // after a failed load, don't churn re-init for this long
+    private static readonly DEFAULT_MODEL = 'Xenova/nllb-200-distilled-600M'
+
+    private getModelId(): string {
+        try {
+            const s: any = store.get('transcription')
+            if (typeof s?.nllbModelId === 'string' && s.nllbModelId) return s.nllbModelId
+        } catch { /* default */ }
+        return NllbTranslationService.DEFAULT_MODEL
+    }
 
     // NLLB uses special language codes
     private static readonly LANG_MAP: Record<string, string> = {
@@ -46,12 +59,29 @@ export class NllbTranslationService {
     }
 
     async initialize(allowDownload: boolean = false): Promise<boolean> {
-        if (this.isLoaded) return true
-        if (this.isLoading) return false
+        const modelId = this.getModelId()
+        if (this.isLoaded && this.loadedModelId === modelId) return true
+        // Share the in-flight init so concurrent callers await the same load
+        if (this.initPromise) return this.initPromise
+        // Model changed since last load → tear down the old worker first
+        if (this.isLoaded && this.loadedModelId !== modelId) {
+            await this.destroy()
+        }
+        this.initPromise = this.startWorker(allowDownload, modelId).finally(() => { this.initPromise = null })
+        return this.initPromise
+    }
 
-        this.isLoading = true
+    private startWorker(allowDownload: boolean, modelId: string): Promise<boolean> {
+        return new Promise((resolve) => {
+            // Resolve the init promise at most once, and never reject (callers treat false as "not ready")
+            const settleInit = (ok: boolean) => {
+                if (this.initCallback) {
+                    this.initCallback = null
+                    if (!ok) this.lastFailTime = Date.now()
+                    resolve(ok)
+                }
+            }
 
-        return new Promise((resolve, reject) => {
             try {
                 const workerPath = path.join(__dirname, 'nllbWorker.js')
                 this.worker = utilityProcess.fork(workerPath, [], {
@@ -65,20 +95,14 @@ export class NllbTranslationService {
                 this.worker.on('message', (msg: any) => {
                     if (msg.type === 'init-success') {
                         this.isLoaded = true
-                        this.isLoading = false
-                        console.log('[NLLB] Translation model loaded successfully in Worker')
-                        if (this.initCallback) {
-                            this.initCallback.resolve(true)
-                            this.initCallback = null
-                        }
+                        this.loadedModelId = modelId
+                        this.lastFailTime = 0
+                        console.log(`[NLLB] Model "${modelId}" loaded successfully in Worker`)
+                        settleInit(true)
                     } else if (msg.type === 'init-error') {
                         console.error('[NLLB] Failed to load model in worker:', msg.error)
                         this.isLoaded = false
-                        this.isLoading = false
-                        if (this.initCallback) {
-                            this.initCallback.resolve(false)
-                            this.initCallback = null
-                        }
+                        settleInit(false)
                     } else if (msg.type === 'translate-success') {
                         const cb = this.translateCallbacks.get(msg.id)
                         if (cb) {
@@ -96,24 +120,30 @@ export class NllbTranslationService {
 
                 this.worker.on('exit', (code) => {
                     console.log(`[NLLB Worker] exited with code ${code}`)
+                    const wasLoaded = this.isLoaded
                     this.isLoaded = false
-                    this.isLoading = false
                     this.worker = null
+                    // An exit during/after init is a failure — settle init and reject any in-flight translations
+                    if (wasLoaded || code !== 0) this.lastFailTime = Date.now()
+                    settleInit(false)
+                    for (const [, cb] of this.translateCallbacks) {
+                        cb.reject(new Error(`NLLB worker exited (code ${code})`))
+                    }
+                    this.translateCallbacks.clear()
                 })
 
-                this.initCallback = { resolve, reject }
+                this.initCallback = { resolve: () => settleInit(true), reject: () => settleInit(false) }
 
-                console.log(`[NLLB] Sending init command to worker (allowDownload: ${allowDownload})...`)
+                console.log(`[NLLB] Sending init command to worker (model: ${modelId}, allowDownload: ${allowDownload})...`)
                 this.worker.postMessage({
                     type: 'init',
-                    payload: { allowDownload, cacheDir: this.cacheDir }
+                    payload: { allowDownload, cacheDir: this.cacheDir, modelId }
                 })
 
             } catch (error) {
                 console.error('[NLLB] Failed to start worker:', error)
                 this.isLoaded = false
-                this.isLoading = false
-                resolve(false)
+                settleInit(false)
             }
         })
     }
@@ -123,8 +153,17 @@ export class NllbTranslationService {
         targetLanguage: string,
         sourceLanguage?: string
     ): Promise<string> {
+        if (!text || !text.trim()) return text
+
+        // Self-heal: the worker may have crashed (V8 OOM / segfault). Try a lazy reload
+        // from the local cache, unless we failed very recently (avoid re-fork churn).
         if (!this.isLoaded || !this.worker) {
-            throw new Error('NLLB model not loaded. Call initialize() first.')
+            if (Date.now() - this.lastFailTime < NllbTranslationService.RETRY_COOLDOWN_MS) {
+                return text // recently failed — fall back to original without thrashing
+            }
+            console.log('[NLLB] Worker not ready — attempting lazy (re)load from cache')
+            const ok = await this.initialize(false)
+            if (!ok || !this.worker) return text // still not ready — fall back to original
         }
 
         const cacheKey = `${sourceLanguage || 'auto'}:${targetLanguage}:${text}`
@@ -152,9 +191,16 @@ export class NllbTranslationService {
                 }
             })
 
+            // Beam search count (quality vs speed) is read live from settings
+            let numBeams = 5
+            try {
+                const s: any = store.get('transcription')
+                if (typeof s?.nllbNumBeams === 'number') numBeams = s.nllbNumBeams
+            } catch { /* default */ }
+
             this.worker!.postMessage({
                 type: 'translate',
-                payload: { text, srcLang, tgtLang, id }
+                payload: { text, srcLang, tgtLang, id, numBeams }
             })
         })
     }
@@ -193,6 +239,7 @@ export class NllbTranslationService {
             this.worker = null
         }
         this.isLoaded = false
+        this.loadedModelId = null
         this.cache = {}
         console.log('[NLLB] Worker Destroyed')
     }
