@@ -1,5 +1,8 @@
-import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, dialog } from 'electron'
+import fs from 'node:fs'
+import crypto from 'node:crypto'
 import { setupStoreHandlers, store } from './store'
+import { ObsServer } from './ObsServer'
 import { LocalWhisperService } from './LocalWhisperService'
 import { GcpSpeechService } from './GcpSpeechService'
 import { GcpTranslationService } from './GcpTranslationService'
@@ -8,6 +11,7 @@ import { SherpaOnnxSpeechService } from './SherpaOnnxSpeechService'
 import { RivaSpeechService } from './RivaSpeechService'
 import { DeepgramSpeechService } from './DeepgramSpeechService'
 import { NllbTranslationService } from './NllbTranslationService'
+import { DeepLTranslationService } from './DeepLTranslationService'
 // import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -48,6 +52,7 @@ let sherpaOnnxService: SherpaOnnxSpeechService | null = null
 let rivaSpeechService: RivaSpeechService | null = null
 let deepgramSpeechService: DeepgramSpeechService | null = null
 let nllbTranslationService: NllbTranslationService | null = null
+let deeplTranslationService: DeepLTranslationService | null = null
 
 // Per-window language layers
 interface LanguageLayer {
@@ -59,21 +64,78 @@ interface LanguageLayer {
   fontFamily: string
   textColor: string
   maxLines: number
+  maxWidth: number   // px, 0 = unlimited (full screen width)
 }
 
 const windowLanguageLayers = new Map<string, LanguageLayer[]>() // windowId -> language layers
 
+// Per-window shared style (background, shadow, alignment) — kept for OBS overlay config
+const windowStyles = new Map<string, any>() // windowId -> WindowStyle
+
+// OBS HTTP/WebSocket server (Browser Source output)
+let obsServer: ObsServer | null = null
+
+// Backgrounds directory: userData/backgrounds/{uuid}.{ext}
+const backgroundsDir = path.join(app.getPath('userData'), 'backgrounds')
+function ensureBackgroundsDir() {
+  try {
+    if (!fs.existsSync(backgroundsDir)) fs.mkdirSync(backgroundsDir, { recursive: true })
+  } catch (e) {
+    console.error('[Main] Failed to create backgrounds dir:', e)
+  }
+}
+
+
+// Send a transcript payload both to the Electron projection window (if open) and
+// to any connected OBS Browser Source clients for that window/preset.
+function sendTranscript(win: BrowserWindow | undefined, windowId: string, payload: any) {
+  if (win && !win.isDestroyed()) win.webContents.send('transcript-update', payload)
+  obsServer?.broadcastTranscript(windowId, payload)
+}
+
+// Resolve the language layers for a target — from memory if a window is open,
+// otherwise from the persisted preset (so OBS works without an open window).
+function resolveLayersForTarget(windowId: string): LanguageLayer[] {
+  const inMemory = windowLanguageLayers.get(windowId)
+  if (inMemory) return inMemory
+  try {
+    const presets: any[] = (store.get('project-state') as any[]) || []
+    const preset = presets.find(p => p.id === windowId)
+    if (preset && Array.isArray(preset.languages)) return preset.languages
+  } catch { /* ignore */ }
+  return []
+}
+
+// Resolve the shared style for a target — from memory or the persisted preset.
+function resolveStyleForTarget(windowId: string): any {
+  const inMemory = windowStyles.get(windowId)
+  if (inMemory) return inMemory
+  try {
+    const presets: any[] = (store.get('project-state') as any[]) || []
+    const preset = presets.find(p => p.id === windowId)
+    if (preset && preset.style) return preset.style
+  } catch { /* ignore */ }
+  return undefined
+}
+
+// The set of broadcast targets: open Electron windows ∪ presets with OBS clients.
+function broadcastTargetIds(): Set<string> {
+  const ids = new Set<string>(projectionWindows.keys())
+  for (const id of obsServer?.getSubscribedPresetIds() || []) ids.add(id)
+  return ids
+}
 
 // Helper to broadcast to all projection windows with per-layer translation support
 async function broadcastToProjectionWindows(channel: string, data: any) {
-  for (const [windowId, win] of projectionWindows.entries()) {
-    if (win.isDestroyed()) continue
+  for (const windowId of broadcastTargetIds()) {
+    const win = projectionWindows.get(windowId)
+    if (win && win.isDestroyed()) continue
 
-    const layers = windowLanguageLayers.get(windowId) || []
+    const layers = resolveLayersForTarget(windowId)
 
     if (channel !== 'transcript-update') {
-      // Non-transcript channels: send as-is
-      win.webContents.send(channel, data)
+      // Non-transcript channels: send as-is (Electron window only)
+      if (win && !win.isDestroyed()) win.webContents.send(channel, data)
       continue
     }
 
@@ -90,7 +152,7 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
         const targetLang = layer.language.split('-')[0]
 
         if (sourceLang && sourceLang === targetLang) {
-          win.webContents.send(channel, { ...data, layerId: layer.id })
+          sendTranscript(win, windowId, { ...data, layerId: layer.id })
           continue
         }
 
@@ -118,25 +180,27 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
             } else {
               console.warn(`[Main] NLLB translation service not initialized yet.`)
             }
+          } else if (translationProvider === 'DEEPL' && deeplTranslationService && deeplTranslationService.isReady()) {
+            translatedText = await deeplTranslationService.translate(data.text, layer.language, data.detectedLanguage)
           } else {
             console.warn(`[Main] Translation service ${translationProvider} not ready for layer ${layer.id}`)
           }
 
           if (translatedText !== null) {
             console.log(`[${translationProvider}] Layer ${layer.id} translation: "${translatedText}"`)
-            win.webContents.send(channel, { ...data, text: translatedText, layerId: layer.id })
+            sendTranscript(win, windowId, { ...data, text: translatedText, layerId: layer.id })
           } else {
-            win.webContents.send(channel, { ...data, layerId: layer.id })
+            sendTranscript(win, windowId, { ...data, layerId: layer.id })
           }
         } catch (error) {
           console.error(`[${translationProvider}] Translation failed for layer ${layer.id}:`, error)
-          win.webContents.send(channel, { ...data, layerId: layer.id })
+          sendTranscript(win, windowId, { ...data, layerId: layer.id })
         }
       } else if (!isTranslationLayer) {
         // Live layer: handled by broadcastLiveCaption, skip here for sentences
         // (sentences also sent to live layers for display)
         if (data.isSentence) {
-          win.webContents.send(channel, { ...data, layerId: layer.id })
+          sendTranscript(win, windowId, { ...data, layerId: layer.id })
         }
       }
     }
@@ -145,13 +209,14 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
 
 // Broadcast interim (live) transcripts — only to layers in 'live' mode
 function broadcastLiveCaption(data: any) {
-  for (const [windowId, win] of projectionWindows.entries()) {
-    if (win.isDestroyed()) continue
+  for (const windowId of broadcastTargetIds()) {
+    const win = projectionWindows.get(windowId)
+    if (win && win.isDestroyed()) continue
 
-    const layers = windowLanguageLayers.get(windowId) || []
+    const layers = resolveLayersForTarget(windowId)
     for (const layer of layers) {
       if (layer.language === 'live') {
-        win.webContents.send('transcript-update', { ...data, layerId: layer.id })
+        sendTranscript(win, windowId, { ...data, layerId: layer.id })
       }
     }
   }
@@ -216,6 +281,8 @@ function createProjectionWindow(id: string, title: string = 'Projection') {
 
   win.on('closed', () => {
     projectionWindows.delete(id)
+    windowStyles.delete(id)
+    obsServer?.notifyWindowClosed(id)
   })
 }
 
@@ -227,6 +294,10 @@ app.on('window-all-closed', () => {
     app.quit()
     mainWindow = null
   }
+})
+
+app.on('before-quit', () => {
+  obsServer?.stop()
 })
 
 function createTray() {
@@ -287,8 +358,47 @@ app.whenReady().then(() => {
   }
 
   setupStoreHandlers()
+  ensureBackgroundsDir()
   createTray()
   createMainWindow()
+
+  // ── OBS Browser Source server (HTTP + WebSocket) ──────────────────────────
+  let obsPort = 3456
+  try {
+    const obsSettings: any = store.get('obs')
+    if (obsSettings && typeof obsSettings.port === 'number' && obsSettings.port > 0) {
+      obsPort = obsSettings.port
+    }
+  } catch { /* default */ }
+
+  obsServer = new ObsServer({
+    port: obsPort,
+    backgroundsDir,
+    // Provide current config for a freshly-connected OBS client
+    getConfig: (windowId: string) => {
+      let cps = 17
+      let queueMaxDepth = 0
+      try {
+        const s: any = store.get('transcription')
+        if (typeof s?.subtitleCPS === 'number') cps = s.subtitleCPS
+        if (typeof s?.subtitleQueueMaxDepth === 'number') queueMaxDepth = s.subtitleQueueMaxDepth
+      } catch { /* defaults */ }
+
+      // OBS can be used without opening the Electron projection window, so these
+      // helpers fall back to the persisted preset when nothing is in memory.
+      return {
+        style: resolveStyleForTarget(windowId),
+        layers: resolveLayersForTarget(windowId),
+        cps,
+        queueMaxDepth
+      }
+    }
+  })
+  obsServer.start().then((actualPort) => {
+    console.log(`[Main] OBS server listening on http://localhost:${actualPort}`)
+  }).catch((e) => {
+    console.error('[Main] Failed to start OBS server:', e)
+  })
 
   // Initialize centralized transcription services (only once)
   if (!localWhisperService) {
@@ -484,6 +594,18 @@ app.whenReady().then(() => {
     }
   }
 
+  if (!deeplTranslationService) {
+    deeplTranslationService = new DeepLTranslationService()
+    try {
+      const settings: any = store.get('transcription')
+      if (settings?.deeplApiKey) {
+        deeplTranslationService.initialize(settings.deeplApiKey, settings.deeplApiUrl)
+      }
+    } catch {
+      console.log('No DeepL key found, DeepL translation disabled')
+    }
+  }
+
   // ── Initialize Sherpa-ONNX STT ──────────────────────────────────────────
   if (!sherpaOnnxService) {
     sherpaOnnxService = new SherpaOnnxSpeechService()
@@ -595,6 +717,14 @@ app.whenReady().then(() => {
       }
       win.webContents.send('settings-updated', settings)
     }
+    // Keep style/layers cached for OBS overlay config, and push to OBS clients
+    if (settings.style) windowStyles.set(id, settings.style)
+    if (settings.languages) windowLanguageLayers.set(id, settings.languages)
+    obsServer?.broadcastConfig(id, {
+      style: windowStyles.get(id),
+      layers: windowLanguageLayers.get(id) || [],
+      title: settings.title
+    })
   })
 
   ipcMain.handle('bring-to-front', (_, { id }) => {
@@ -604,6 +734,68 @@ app.whenReady().then(() => {
       win.focus()
       win.moveTop()
     }
+  })
+
+  // ── Background image handlers ─────────────────────────────────────────────
+  ipcMain.handle('select-background-image', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Background Image',
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+
+    ensureBackgroundsDir()
+    const srcPath = result.filePaths[0]
+    const ext = path.extname(srcPath).toLowerCase() || '.png'
+    const filename = `${crypto.randomUUID()}${ext}`
+    const destPath = path.join(backgroundsDir, filename)
+    try {
+      await fs.promises.copyFile(srcPath, destPath)
+      return filename
+    } catch (e) {
+      console.error('[Main] Failed to copy background image:', e)
+      return null
+    }
+  })
+
+  // Return an HTTP URL (served by the OBS server) for a stored background filename.
+  // Using http rather than file:// so it loads in the Dashboard preview and the
+  // projection window regardless of their origin / webSecurity (dev vs packaged).
+  ipcMain.handle('get-background-image-path', (_, filename: string) => {
+    if (!filename) return null
+    const full = path.join(backgroundsDir, filename)
+    if (!fs.existsSync(full)) return null
+    const port = obsServer?.getPort() ?? 3456
+    return `http://localhost:${port}/backgrounds/${encodeURIComponent(filename)}`
+  })
+
+  // Push a preset's current style/layers to connected OBS clients, even when no
+  // Electron projection window is open (Dashboard calls this on every edit).
+  ipcMain.handle('push-obs-config', (_, { id, style, languages }: { id: string, style?: any, languages?: any[] }) => {
+    obsServer?.broadcastConfig(id, { style, layers: languages || [] })
+  })
+
+  // ── OBS overlay URL ───────────────────────────────────────────────────────
+  ipcMain.handle('get-obs-url', (_, { presetId }: { presetId: string }) => {
+    const port = obsServer?.getPort() ?? 3456
+    return `http://localhost:${port}/obs/${presetId}`
+  })
+
+  // Get the active OBS server port (for Settings display)
+  ipcMain.handle('get-obs-port', () => obsServer?.getPort() ?? 3456)
+
+  // Change the OBS server port (persists to store + restarts server)
+  ipcMain.handle('set-obs-port', async (_, port: number) => {
+    if (!port || port < 1 || port > 65535) return { ok: false, error: 'Invalid port' }
+    try {
+      store.set('obs', { ...(store.get('obs') as any || {}), port })
+    } catch { /* ignore */ }
+    if (obsServer) {
+      const actual = await obsServer.restart(port)
+      return { ok: true, port: actual }
+    }
+    return { ok: false, error: 'Server not running' }
   })
 
   ipcMain.handle('get-displays', () => {
@@ -654,6 +846,11 @@ app.whenReady().then(() => {
     if (win && !win.isDestroyed()) {
       win.webContents.send('languages-updated', { languages })
     }
+    // Push to OBS overlay clients
+    obsServer?.broadcastConfig(windowId, {
+      style: windowStyles.get(windowId),
+      layers: languages
+    })
   })
 
   // Handler to get window language layers
@@ -672,7 +869,8 @@ app.whenReady().then(() => {
       fontSize: 48,
       fontFamily: 'Arial',
       textColor: '#FFFFFF',
-      maxLines: 4
+      maxLines: 4,
+      maxWidth: 0
     }
     windowLanguageLayers.set(windowId, [layer])
     console.log(`Window ${windowId} language set (legacy): ${language}`)
@@ -695,6 +893,13 @@ app.whenReady().then(() => {
       return gcpTranslationService.initialize(keyJson)
     }
     return false
+  })
+
+  // Handler to update DeepL API key dynamically
+  ipcMain.handle('update-deepl-key', (_, { apiKey, apiUrl }: { apiKey: string, apiUrl?: string }) => {
+    if (!deeplTranslationService) deeplTranslationService = new DeepLTranslationService()
+    console.log('Updating DeepL API key for Translation Service...')
+    return deeplTranslationService.initialize(apiKey, apiUrl)
   })
 
 

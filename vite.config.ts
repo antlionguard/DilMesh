@@ -40,6 +40,8 @@ export default defineConfig({
                 // WebSocket native optional deps (used by Deepgram SDK's ws)
                 'bufferutil',
                 'utf-8-validate',
+                // OBS server WebSocket library
+                'ws',
               ]
             }
           }

@@ -1,6 +1,17 @@
 <template>
-  <div class="fixed inset-0 w-screen h-screen -z-10 transition-colors duration-300 draggable-region" 
+  <div class="fixed inset-0 w-screen h-screen -z-10 transition-colors duration-300 draggable-region"
        :style="{ backgroundColor: sharedStyle.backgroundColor }">
+  </div>
+  <!-- Optional background image layer (over the chroma color) -->
+  <div v-if="backgroundImageUrl"
+       class="fixed inset-0 w-screen h-screen -z-10 transition-opacity duration-300 draggable-region"
+       :style="{
+         backgroundImage: `url('${backgroundImageUrl}')`,
+         backgroundSize: 'cover',
+         backgroundPosition: 'center',
+         backgroundRepeat: 'no-repeat',
+         opacity: backgroundOpacity
+       }">
   </div>
   <!-- Render one positioned div per language layer -->
   <div 
@@ -16,10 +27,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { CSSProperties } from 'vue'
+
+interface WindowStyle {
+  backgroundColor: string
+  textShadow: boolean
+  justifyContent: string
+  backgroundImage?: string     // filename stored under userData/backgrounds/
+  backgroundOpacity?: number   // 0.0 - 1.0
+}
 
 interface LanguageLayer {
   id: string
@@ -36,11 +55,30 @@ interface LanguageLayer {
 const route = useRoute()
 
 // Shared style (background, shadow, alignment)
-const sharedStyle = ref({
+const sharedStyle = ref<WindowStyle>({
   backgroundColor: '#00FF00',
   textShadow: true,
   justifyContent: 'center'
 })
+
+// Resolved file:// URL for the optional background image
+const backgroundImageUrl = ref<string | null>(null)
+const backgroundOpacity = computed(() =>
+  typeof sharedStyle.value.backgroundOpacity === 'number' ? sharedStyle.value.backgroundOpacity : 1
+)
+
+async function resolveBackgroundImage() {
+  const file = sharedStyle.value.backgroundImage
+  if (file) {
+    try {
+      backgroundImageUrl.value = await window.ipcRenderer.invoke('get-background-image-path', file)
+    } catch {
+      backgroundImageUrl.value = null
+    }
+  } else {
+    backgroundImageUrl.value = null
+  }
+}
 
 // Language layers with their individual settings
 const layers = ref<LanguageLayer[]>([])
@@ -263,6 +301,7 @@ onMounted(async () => {
   window.ipcRenderer.on('settings-updated', async (_event, settings: any) => {
     if (settings.style) {
       sharedStyle.value = settings.style
+      resolveBackgroundImage()
     }
     if (settings.languages) {
       // Update layers with new settings from dashboard

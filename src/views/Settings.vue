@@ -418,7 +418,7 @@
       <div v-if="activeTab === 'translation'" class="space-y-6">
         <div>
           <h2 class="text-xl font-semibold mb-4 text-white">Translation Provider</h2>
-          <div class="grid grid-cols-4 gap-2">
+          <div class="grid grid-cols-5 gap-2">
             <button
               v-for="p in translationProviders"
               :key="p.id"
@@ -480,6 +480,33 @@
           </div>
         </div>
 
+        <!-- DeepL Settings -->
+        <div v-if="settings.translationProvider === 'DEEPL'" class="p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
+          <h3 class="text-lg font-medium mb-3 text-sky-400">🌊 DeepL</h3>
+          <p class="text-xs text-gray-500 mb-3">High-quality translation. Free tier: 500K chars/month. Free keys end with <span class="font-mono">:fx</span> and auto-route to the free API.</p>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">API Key</label>
+            <input
+              v-model="settings.deeplApiKey"
+              type="password"
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
+              class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm font-mono"
+            />
+          </div>
+          <div class="mt-3">
+            <label class="block text-sm text-gray-400 mb-1">API URL <span class="text-gray-600">(optional override)</span></label>
+            <input
+              v-model="settings.deeplApiUrl"
+              type="text"
+              placeholder="auto (api-free.deepl.com / api.deepl.com)"
+              class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm font-mono"
+            />
+          </div>
+          <div class="bg-sky-900/20 border border-sky-500/30 rounded p-3 mt-3 text-xs text-sky-200">
+            <p>💡 Unsupported target languages fall back to the original text. DeepL supports ~30 languages (EN, TR, DE, FR, ES, IT, JA, ZH, RU, AR, …).</p>
+          </div>
+        </div>
+
         <!-- Subtitle Display Settings (common) -->
         <div class="p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
           <h3 class="text-lg font-medium mb-3 text-cyan-400">📺 Subtitle Display</h3>
@@ -520,6 +547,30 @@
             </div>
             <p class="text-xs text-blue-400 mt-1">Interim text is split into sentences when these characters are detected.</p>
           </div>
+        </div>
+
+        <!-- OBS Output (Browser Source) -->
+        <div class="p-4 bg-gray-900/50 rounded-lg border border-gray-700/50">
+          <h3 class="text-lg font-medium mb-3 text-purple-400">🎬 OBS Output</h3>
+          <p class="text-xs text-gray-400 mb-3">
+            Expose each preset as an OBS <strong>Browser Source</strong>. Copy a preset's OBS URL from the Dashboard,
+            then add it as a Browser Source in OBS. Use a Color Key filter on the chroma background color.
+          </p>
+          <div class="flex items-end gap-3">
+            <div>
+              <label class="block text-sm text-gray-400 mb-1">Server Port</label>
+              <input type="number" v-model.number="obsPort" min="1" max="65535"
+                class="w-28 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm" />
+            </div>
+            <button @click="applyObsPort"
+              class="bg-purple-700 hover:bg-purple-600 text-white text-sm px-4 py-2 rounded transition-colors">
+              Apply &amp; Restart
+            </button>
+            <span v-if="obsPortStatus" class="text-xs text-emerald-400 mb-2">{{ obsPortStatus }}</span>
+          </div>
+          <p class="text-xs text-blue-400 mt-2">
+            Active server: <span class="font-mono">http://localhost:{{ activeObsPort }}/obs/&lt;presetId&gt;</span>
+          </p>
         </div>
       </div>
 
@@ -616,6 +667,24 @@ import { ref, onMounted } from 'vue'
 
 const activeTab = ref<'stt' | 'translation' | 'api'>('stt')
 
+// OBS Output server port
+const obsPort = ref(3456)
+const activeObsPort = ref(3456)
+const obsPortStatus = ref('')
+
+const applyObsPort = async () => {
+  obsPortStatus.value = ''
+  const result = await window.ipcRenderer.invoke('set-obs-port', obsPort.value)
+  if (result?.ok) {
+    activeObsPort.value = result.port
+    obsPort.value = result.port
+    obsPortStatus.value = `✓ Running on ${result.port}`
+    setTimeout(() => { obsPortStatus.value = '' }, 3000)
+  } else {
+    obsPortStatus.value = `✗ ${result?.error || 'Failed'}`
+  }
+}
+
 const tabs = [
   { id: 'stt' as const, icon: '🎙️', label: 'Speech-to-Text' },
   { id: 'translation' as const, icon: '🌐', label: 'Translation' },
@@ -632,6 +701,7 @@ const sttProviders = [
 
 const translationProviders = [
   { id: 'GCP', name: 'GCP', icon: '☁️', badge: 'Cloud' },
+  { id: 'DEEPL', name: 'DeepL', icon: '🌊', badge: 'Cloud' },
   { id: 'NLLB', name: 'NLLB-200', icon: '🧠', badge: 'Offline' },
   { id: 'RIVA_NMT', name: 'Riva NMT', icon: '⚡', badge: 'GPU Server' },
   { id: 'NONE', name: 'Disabled', icon: '🚫', badge: '' },
@@ -662,6 +732,9 @@ const settings = ref({
   gcpProfanityFilter: false,
   // GCP Translation
   gcpTranslationModel: 'v2',
+  // DeepL Translation
+  deeplApiKey: '',
+  deeplApiUrl: '',
   // Subtitle display
   subtitleQueueMaxDepth: 0,
   subtitleCPS: 17,
@@ -860,6 +933,15 @@ onMounted(async () => {
     }
   }
 
+  // Load active OBS server port
+  try {
+    const port = await window.ipcRenderer.invoke('get-obs-port')
+    if (typeof port === 'number') {
+      activeObsPort.value = port
+      obsPort.value = port
+    }
+  } catch { /* OBS server may not be ready yet */ }
+
   await refreshAllModels()
   await getAudioDevices()
   navigator.mediaDevices.ondevicechange = getAudioDevices
@@ -976,6 +1058,13 @@ const saveSettings = async () => {
 
   if (settings.value.gcpKeyJson) {
     await window.ipcRenderer.invoke('update-gcp-credentials', settings.value.gcpKeyJson)
+  }
+
+  if (settings.value.deeplApiKey) {
+    await window.ipcRenderer.invoke('update-deepl-key', {
+      apiKey: settings.value.deeplApiKey,
+      apiUrl: settings.value.deeplApiUrl || undefined
+    })
   }
 
   // Update live pipeline settings

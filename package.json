@@ -1,7 +1,7 @@
 {
   "name": "dilmesh",
   "private": true,
-  "version": "2.2.4",
+  "version": "2.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -27,9 +27,11 @@
     "pinia": "^3.0.4",
     "sherpa-onnx-node": "^1.12.26",
     "vue": "^3.4.21",
-    "vue-router": "^5.0.2"
+    "vue-router": "^5.0.2",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/ws": "^8.5.12",
     "@vitejs/plugin-vue": "^5.0.4",
     "autoprefixer": "^10.4.24",
     "electron": "^30.0.1",

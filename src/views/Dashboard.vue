@@ -46,10 +46,19 @@
             </div>
             
             <div class="flex gap-1">
+              <!-- OBS URL copy -->
+              <button
+                @click.stop="copyObsUrl(preset)"
+                class="text-xs px-2 py-1 rounded transition-colors uppercase font-bold tracking-wide"
+                :class="obsCopiedId === preset.id ? 'bg-purple-600 text-white' : 'bg-purple-900/70 hover:bg-purple-800 text-purple-100'"
+                :title="`Copy OBS Browser Source URL for ${preset.name}`"
+              >
+                {{ obsCopiedId === preset.id ? '✓ Copied' : 'OBS' }}
+              </button>
               <!-- Open/Close Controls -->
-              <button 
+              <button
                 v-if="!activeWindows.has(preset.id)"
-                @click.stop="openWindow(preset)" 
+                @click.stop="openWindow(preset)"
                 class="bg-green-700 hover:bg-green-600 text-white text-xs px-3 py-1 rounded transition-colors uppercase font-bold tracking-wide"
               >
                 Open
@@ -135,11 +144,45 @@
                 <input v-model="selectedPreset.style.textShadow" type="checkbox" :id="'shadow-'+selectedPreset.id" class="w-5 h-5 rounded border-gray-600 accent-blue-500" />
                 <label :for="'shadow-'+selectedPreset.id" class="text-sm select-none cursor-pointer text-gray-300">Enable Text Shadow</label>
               </div>
+
+              <!-- Background Image -->
+              <div class="pt-2">
+                <label class="block text-sm text-gray-400 mb-1">Background Image</label>
+                <div class="flex items-center gap-2">
+                  <div v-if="bgImageUrl" class="w-16 h-10 rounded border border-gray-600 bg-gray-900 overflow-hidden flex-none">
+                    <img :src="bgImageUrl" class="w-full h-full object-cover" alt="bg" />
+                  </div>
+                  <button @click="selectBackgroundImage" class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-1.5 rounded transition-colors">
+                    {{ selectedPreset.style.backgroundImage ? 'Change' : 'Select Image' }}
+                  </button>
+                  <button v-if="selectedPreset.style.backgroundImage" @click="removeBackgroundImage" class="bg-red-900/70 hover:bg-red-800 text-red-100 text-xs px-3 py-1.5 rounded transition-colors">
+                    Remove
+                  </button>
+                </div>
+                <div v-if="selectedPreset.style.backgroundImage" class="mt-3">
+                  <label class="block text-sm text-gray-400 mb-1">
+                    Opacity: <span class="text-blue-400">{{ Math.round((selectedPreset.style.backgroundOpacity ?? 1) * 100) }}%</span>
+                  </label>
+                  <input v-model.number="selectedPreset.style.backgroundOpacity" type="range" min="0" max="1" step="0.05" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                </div>
+              </div>
             </div>
 
             <!-- Layout & Display -->
             <div class="space-y-4">
               <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider">Display Target</h3>
+              <div>
+                <label class="block text-sm text-gray-400 mb-1">Output Size (W × H)</label>
+                <div class="flex items-center gap-2">
+                  <input v-model.number="selectedPreset.outputWidth" type="number" min="0" :placeholder="String(outputWidth)" class="w-24 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm" />
+                  <span class="text-gray-500">×</span>
+                  <input v-model.number="selectedPreset.outputHeight" type="number" min="0" :placeholder="String(outputHeight)" class="w-24 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm" />
+                  <button v-if="selectedPreset.targetDisplayId" @click="useDisplaySizeForOutput" class="text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 px-2 py-1.5 rounded transition-colors" title="Use the target display resolution">
+                    From display
+                  </button>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">OBS capture / canvas size (e.g. 5120 × 512). Drives grid widths &amp; preview. Set your OBS Browser Source to the same size. Boş = otomatik.</p>
+              </div>
               <div>
                 <label class="block text-sm text-gray-400 mb-1">Target Display</label>
                 <select v-model="selectedPreset.targetDisplayId" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2">
@@ -148,7 +191,7 @@
                     {{ display.label }} ({{ display.bounds.width }}x{{ display.bounds.height }})
                   </option>
                 </select>
-                <p class="text-xs text-gray-500 mt-1">If set, opening will force fullscreen on this display.</p>
+                <p class="text-xs text-gray-500 mt-1">Optional — only for projecting to a physical screen. For OBS capture leave as Windowed.</p>
               </div>
               <div>
                 <label class="block text-sm text-gray-400 mb-1">Vertical Alignment</label>
@@ -161,6 +204,113 @@
             </div>
           </div>
 
+          <!-- Live Layout Preview -->
+          <div class="pt-4 border-t border-gray-700/50">
+            <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider mb-2">Preview</h3>
+            <div
+              class="relative w-full rounded-lg overflow-hidden border border-gray-700"
+              :style="{
+                aspectRatio: previewAspectRatio,
+                backgroundColor: selectedPreset.style.backgroundColor,
+                containerType: 'size'
+              }"
+            >
+              <!-- Background image with opacity -->
+              <div
+                v-if="bgImageUrl"
+                class="absolute inset-0"
+                :style="{
+                  backgroundImage: `url('${bgImageUrl}')`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                  opacity: selectedPreset.style.backgroundOpacity ?? 1
+                }"
+              ></div>
+              <!-- Grid line overlay (matches columns × rows) -->
+              <div
+                v-if="showGridLines"
+                class="absolute inset-0 grid pointer-events-none"
+                :style="{
+                  gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
+                  gridTemplateRows: `repeat(${effectiveGridRows}, minmax(0, 1fr))`
+                }"
+              >
+                <div v-for="n in (gridColumns * effectiveGridRows)" :key="'gl-' + n" class="border border-white/25"></div>
+              </div>
+              <!-- Positioned layers -->
+              <div
+                v-for="layer in selectedPreset.languages"
+                :key="'preview-' + layer.id"
+                class="cursor-pointer"
+                :style="previewLayerStyle(layer)"
+                :title="getLanguageLabel(layer.language)"
+                @click="selectLayerFromPreview(layer)"
+              >
+                <div :style="previewTextStyle(layer)">{{ getLanguageLabel(layer.language) }}</div>
+              </div>
+              <div v-if="selectedPreset.languages.length === 0" class="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">
+                Add languages to see the layout
+              </div>
+            </div>
+          </div>
+
+          <!-- Auto Grid Layout -->
+          <div class="pt-4 border-t border-gray-700/50">
+            <h3 class="font-semibold text-gray-400 text-sm uppercase tracking-wider mb-3">Auto Grid Layout</h3>
+            <div class="flex flex-wrap items-end gap-3">
+              <div>
+                <label class="block text-xs text-gray-400 mb-1">Columns</label>
+                <input v-model.number="gridColumns" type="number" min="1" max="30" class="w-20 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="block text-xs text-gray-400 mb-1">Rows <span class="text-gray-600">(0 = auto)</span></label>
+                <input v-model.number="gridRows" type="number" min="0" max="30" class="w-24 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="block text-xs text-gray-400 mb-1">Gap (px)</label>
+                <input v-model.number="gridGap" type="number" min="0" step="2" class="w-20 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm" />
+              </div>
+              <div class="text-xs text-gray-500 mb-2">
+                {{ selectedPreset.languages.length }} layers → {{ gridColumns }}×{{ effectiveGridRows }} grid
+              </div>
+              <button @click="applyAutoGrid" class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded transition-colors">
+                📐 Apply Grid
+              </button>
+              <button @click="resetPositions" class="bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm px-4 py-2 rounded transition-colors">
+                ↩ Reset Positions
+              </button>
+              <label class="flex items-center gap-1.5 text-xs text-gray-400 mb-2 cursor-pointer select-none">
+                <input v-model="showGridLines" type="checkbox" class="w-4 h-4 rounded border-gray-600 accent-blue-500" />
+                Show grid lines in preview
+              </label>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">Each language's <strong>maxWidth = {{ outputWidth }}px (output width) ÷ {{ gridColumns }} columns − {{ gridGap }}px gap = {{ Math.max(0, Math.floor(outputWidth / Math.max(1, gridColumns)) - gridGap) }}px</strong>. Assign a language to each cell below to match a bordered background image.</p>
+
+            <!-- Cell assignment grid: pick which language goes in each box -->
+            <div
+              v-if="selectedPreset.languages.length > 0"
+              class="mt-3 grid gap-1"
+              :style="{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }"
+            >
+              <template v-for="r in effectiveGridRows" :key="'gr-' + r">
+                <div v-for="c in gridColumns" :key="'gc-' + r + '-' + c" class="border border-gray-700 rounded bg-gray-900/40 p-1">
+                  <div class="text-[10px] text-gray-600 mb-0.5 leading-none">R{{ r }}·C{{ c }}</div>
+                  <select
+                    :value="cellLayerId(r - 1, c - 1)"
+                    @change="onCellChange(r - 1, c - 1, $event)"
+                    class="w-full bg-gray-800 border border-gray-600 rounded px-1 py-1 text-xs"
+                    :class="cellLayerId(r - 1, c - 1) ? 'text-white' : 'text-gray-500'"
+                  >
+                    <option value="">— empty —</option>
+                    <option v-for="layer in selectedPreset.languages" :key="layer.id" :value="layer.id">
+                      {{ getLanguageLabel(layer.language) }}
+                    </option>
+                  </select>
+                </div>
+              </template>
+            </div>
+          </div>
+
           <!-- Language Layers -->
           <div class="pt-4 border-t border-gray-700/50">
             <div class="flex justify-between items-center mb-4">
@@ -168,6 +318,45 @@
               <button @click="addLanguageLayer" class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded transition-colors">
                 + Add Language
               </button>
+            </div>
+
+            <!-- Bulk style: set values, then "Apply to all" (does not auto-apply) -->
+            <div v-if="selectedPreset.languages.length > 0" class="mb-4 p-3 bg-gray-900/40 rounded-lg border border-gray-700/50">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs text-gray-400 uppercase tracking-wider">Bulk Style</span>
+                <button @click="applyBulkToAll" class="bg-emerald-700 hover:bg-emerald-600 text-white text-xs px-3 py-1.5 rounded transition-colors font-medium">
+                  Apply to all ({{ selectedPreset.languages.length }})
+                </button>
+              </div>
+              <div class="flex flex-wrap items-end gap-3">
+                <div>
+                  <label class="block text-[11px] text-gray-500 mb-1">Font Size: {{ bulk.fontSize }}px</label>
+                  <input v-model.number="bulk.fontSize" type="range" min="12" max="120" class="w-32 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-gray-500 mb-1">Font Family</label>
+                  <select v-model="bulk.fontFamily" class="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm">
+                    <option value="Arial">Arial</option>
+                    <option value="Verdana">Verdana</option>
+                    <option value="Helvetica">Helvetica</option>
+                    <option value="Georgia">Georgia</option>
+                    <option value="Courier New">Courier New</option>
+                    <option value="Impact">Impact</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-[11px] text-gray-500 mb-1">Max Lines</label>
+                  <input v-model.number="bulk.maxLines" type="number" min="0" max="10" class="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm" />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-gray-500 mb-1">Text Color</label>
+                  <div class="flex gap-1">
+                    <input v-model="bulk.textColor" type="color" class="h-8 w-10 rounded cursor-pointer border border-gray-600" />
+                    <input v-model="bulk.textColor" type="text" class="w-24 bg-gray-800 border border-gray-600 rounded px-2 text-xs font-mono uppercase" />
+                  </div>
+                </div>
+              </div>
+              <p class="text-[11px] text-gray-500 mt-2">Set values above, then click "Apply to all". Individual layers can still be customized afterwards.</p>
             </div>
 
             <div v-if="selectedPreset.languages.length === 0" class="text-center text-gray-500 py-8 border border-dashed border-gray-700 rounded-lg">
@@ -351,12 +540,16 @@ interface LanguageLayer {
   textColor: string
   maxLines: number
   maxWidth: number          // px, 0 = unlimited (full screen width)
+  gridRow?: number          // 0-based assigned grid row (Auto Grid)
+  gridCol?: number          // 0-based assigned grid column (Auto Grid)
 }
 
 interface WindowStyle {
   backgroundColor: string
   textShadow: boolean
   justifyContent: 'flex-start' | 'center' | 'flex-end'
+  backgroundImage?: string     // filename under userData/backgrounds/
+  backgroundOpacity?: number   // 0.0 - 1.0 (default 1.0)
 }
 
 interface WindowPreset {
@@ -367,6 +560,8 @@ interface WindowPreset {
   language?: string  // DEPRECATED: kept for backward compat migration
   languages: LanguageLayer[]
   style: WindowStyle
+  outputWidth?: number   // reference output resolution (px) for grid math & preview
+  outputHeight?: number
 }
 
 const presets = ref<WindowPreset[]>([])
@@ -385,6 +580,48 @@ const displays = ref<any[]>([])
 
 const selectedPresetId = ref<string | null>(null)
 const selectedPreset = computed(() => presets.value.find(p => p.id === selectedPresetId.value))
+
+// Background image preview URL (file://) for the selected preset
+const bgImageUrl = ref<string | null>(null)
+
+// Auto Grid inputs
+const gridColumns = ref(4)
+const gridRows = ref(0)   // 0 = auto (ceil(count / columns))
+const gridGap = ref(10)
+const showGridLines = ref(true)  // overlay cell borders on the preview
+
+// Bulk style applied to all language layers at once
+const bulk = ref({ fontSize: 48, fontFamily: 'Arial', textColor: '#FFFFFF', maxLines: 4 })
+
+// Effective row count used by the grid (explicit if set, else auto)
+const effectiveGridRows = computed(() => {
+  const count = selectedPreset.value?.languages.length ?? 0
+  const cols = Math.max(1, Math.floor(gridColumns.value))
+  return gridRows.value > 0 ? Math.floor(gridRows.value) : Math.max(1, Math.ceil(count / cols))
+})
+
+// OBS URL copy feedback (preset id that was just copied)
+const obsCopiedId = ref<string | null>(null)
+
+// ── Output dimensions ────────────────────────────────────────────────────────
+// The reference output resolution (the OBS Browser Source / capture size). This
+// is what drives the grid's pixel widths and the preview aspect ratio. It is
+// independent of any physical display — for OBS capture there is no display.
+// Priority: explicit preset value → selected target display → 1920×1080 default.
+const outputWidth = computed(() => {
+  if (selectedPreset.value?.outputWidth && selectedPreset.value.outputWidth > 0) return selectedPreset.value.outputWidth
+  const d = displays.value.find(x => x.id === selectedPreset.value?.targetDisplayId)
+  return d?.bounds?.width ?? 1920
+})
+const outputHeight = computed(() => {
+  if (selectedPreset.value?.outputHeight && selectedPreset.value.outputHeight > 0) return selectedPreset.value.outputHeight
+  const d = displays.value.find(x => x.id === selectedPreset.value?.targetDisplayId)
+  return d?.bounds?.height ?? 1080
+})
+
+// Preview uses the output dimensions
+const previewScreenWidth = computed(() => outputWidth.value)
+const previewAspectRatio = computed(() => `${outputWidth.value} / ${outputHeight.value}`)
 
 onMounted(async () => {
   await getAudioDevices()
@@ -536,6 +773,8 @@ const loadPresets = async () => {
             backgroundColor: p.style?.backgroundColor ?? '#00FF00',
             textShadow: p.style?.textShadow ?? true,
             justifyContent: p.style?.justifyContent ?? 'center',
+            backgroundImage: p.style?.backgroundImage,
+            backgroundOpacity: p.style?.backgroundOpacity ?? 1,
           }
         } as WindowPreset
       }
@@ -563,6 +802,8 @@ const loadPresets = async () => {
           backgroundColor: p.style?.backgroundColor ?? '#00FF00',
           textShadow: p.style?.textShadow ?? true,
           justifyContent: p.style?.justifyContent ?? 'center',
+          backgroundImage: p.style?.backgroundImage,
+          backgroundOpacity: p.style?.backgroundOpacity ?? 1,
         }
       } as WindowPreset
     })
@@ -583,6 +824,7 @@ const createNewPreset = () => {
       backgroundColor: '#00FF00',
       textShadow: true,
       justifyContent: 'center',
+      backgroundOpacity: 1,
     }
   }
   presets.value.push(newPreset)
@@ -646,6 +888,15 @@ const updateLiveWindow = (preset: WindowPreset) => {
     }
 }
 
+// Push style/layers to connected OBS clients (works even with no open window)
+const updateObsConfig = (preset: WindowPreset) => {
+  window.ipcRenderer.invoke('push-obs-config', {
+    id: preset.id,
+    style: JSON.parse(JSON.stringify(preset.style)),
+    languages: JSON.parse(JSON.stringify(preset.languages))
+  })
+}
+
 const bringToFront = async (id: string) => {
   await window.ipcRenderer.invoke('bring-to-front', { id })
 }
@@ -700,6 +951,221 @@ const closeWindow = async (id: string) => {
 
 const selectPreset = (preset: WindowPreset) => {
   selectedPresetId.value = preset.id
+  resolveSelectedBg()
+}
+
+// ── Background Image ─────────────────────────────────────────────────────────
+const resolveSelectedBg = async () => {
+  const file = selectedPreset.value?.style.backgroundImage
+  if (file) {
+    try {
+      bgImageUrl.value = await window.ipcRenderer.invoke('get-background-image-path', file)
+    } catch {
+      bgImageUrl.value = null
+    }
+  } else {
+    bgImageUrl.value = null
+  }
+}
+
+const selectBackgroundImage = async () => {
+  if (!selectedPreset.value) return
+  const filename = await window.ipcRenderer.invoke('select-background-image')
+  if (filename) {
+    selectedPreset.value.style.backgroundImage = filename
+    if (typeof selectedPreset.value.style.backgroundOpacity !== 'number') {
+      selectedPreset.value.style.backgroundOpacity = 1
+    }
+    await resolveSelectedBg()
+    savePresetsToDisk()
+  }
+}
+
+const removeBackgroundImage = () => {
+  if (!selectedPreset.value) return
+  selectedPreset.value.style.backgroundImage = undefined
+  bgImageUrl.value = null
+  savePresetsToDisk()
+}
+
+// ── Auto Grid Layout ─────────────────────────────────────────────────────────
+// Core grid layout: honors each layer's explicit (gridRow, gridCol) assignment,
+// then fills any unassigned layers into the remaining free cells (row-major).
+// Finally derives positionX/Y/maxWidth so it aligns with a same-size bordered
+// background image divided into the same columns × rows.
+const recomputeGridPositions = () => {
+  if (!selectedPreset.value) return
+  const layers = selectedPreset.value.languages
+  if (layers.length === 0) { savePresetsToDisk(); return }
+
+  const columns = Math.max(1, Math.floor(gridColumns.value))
+  const rows = effectiveGridRows.value
+  const gap = Math.max(0, Math.floor(gridGap.value))
+  const cellWidthPct = 100 / columns
+  const cellHeightPct = 100 / rows
+
+  const maxWidthPx = Math.max(0, Math.floor(outputWidth.value / columns) - gap)
+
+  // Collect valid explicit assignments; drop out-of-range ones
+  const occupied = new Set<string>()
+  for (const l of layers) {
+    const validCol = Number.isInteger(l.gridCol) && l.gridCol! >= 0 && l.gridCol! < columns
+    const validRow = Number.isInteger(l.gridRow) && l.gridRow! >= 0 && l.gridRow! < rows
+    if (validCol && validRow) {
+      occupied.add(`${l.gridRow}-${l.gridCol}`)
+    } else {
+      l.gridRow = undefined
+      l.gridCol = undefined
+    }
+  }
+
+  // Fill unassigned layers into free cells, row-major
+  let cellIdx = 0
+  const totalCells = columns * rows
+  const nextFreeCell = () => {
+    while (cellIdx < totalCells) {
+      const r = Math.floor(cellIdx / columns)
+      const c = cellIdx % columns
+      cellIdx++
+      if (!occupied.has(`${r}-${c}`)) return { r, c }
+    }
+    return null
+  }
+  for (const l of layers) {
+    if (l.gridRow == null || l.gridCol == null) {
+      const free = nextFreeCell()
+      if (free) {
+        l.gridRow = free.r
+        l.gridCol = free.c
+        occupied.add(`${free.r}-${free.c}`)
+      }
+    }
+  }
+
+  // Derive positions from assigned cells
+  for (const l of layers) {
+    if (l.gridRow == null || l.gridCol == null) continue
+    l.positionX = Math.round((l.gridCol + 0.5) * cellWidthPct * 100) / 100
+    l.positionY = Math.round((l.gridRow + 0.5) * cellHeightPct * 100) / 100
+    l.maxWidth = maxWidthPx
+  }
+  savePresetsToDisk()
+}
+
+const applyAutoGrid = () => recomputeGridPositions()
+
+// Copy the selected target display's resolution into the output size fields
+const useDisplaySizeForOutput = () => {
+  const d = displays.value.find(x => x.id === selectedPreset.value?.targetDisplayId)
+  if (d?.bounds && selectedPreset.value) {
+    selectedPreset.value.outputWidth = d.bounds.width
+    selectedPreset.value.outputHeight = d.bounds.height
+    savePresetsToDisk()
+  }
+}
+
+// Which layer (id) currently occupies a given cell
+const cellLayerId = (row: number, col: number): string => {
+  const l = selectedPreset.value?.languages.find(x => x.gridRow === row && x.gridCol === col)
+  return l?.id || ''
+}
+
+// Assign (or clear) the language layer occupying a cell. Swaps if the chosen
+// layer was already placed elsewhere.
+const assignCell = (row: number, col: number, layerId: string) => {
+  if (!selectedPreset.value) return
+  const layers = selectedPreset.value.languages
+  const occupant = layers.find(l => l.gridRow === row && l.gridCol === col) || null
+
+  if (!layerId) {
+    // Clear this cell
+    if (occupant) { occupant.gridRow = undefined; occupant.gridCol = undefined }
+  } else {
+    const newLayer = layers.find(l => l.id === layerId)
+    if (!newLayer) return
+    const oldRow = newLayer.gridRow
+    const oldCol = newLayer.gridCol
+    newLayer.gridRow = row
+    newLayer.gridCol = col
+    // Swap the displaced layer into the chosen layer's old cell
+    if (occupant && occupant.id !== newLayer.id) {
+      occupant.gridRow = oldRow
+      occupant.gridCol = oldCol
+    }
+  }
+  recomputeGridPositions()
+}
+
+const onCellChange = (row: number, col: number, event: Event) => {
+  assignCell(row, col, (event.target as HTMLSelectElement).value)
+}
+
+// Apply the bulk style values to every layer at once (only on button click,
+// so individual per-layer tweaks made afterwards are preserved).
+const applyBulkToAll = () => {
+  if (!selectedPreset.value) return
+  selectedPreset.value.languages.forEach((l) => {
+    l.fontSize = bulk.value.fontSize
+    l.fontFamily = bulk.value.fontFamily
+    l.textColor = bulk.value.textColor
+    l.maxLines = bulk.value.maxLines
+  })
+  savePresetsToDisk()
+}
+
+const resetPositions = () => {
+  if (!selectedPreset.value) return
+  selectedPreset.value.languages.forEach((layer) => {
+    layer.positionX = 50
+    layer.positionY = 50
+    layer.maxWidth = 0
+    layer.gridRow = undefined
+    layer.gridCol = undefined
+  })
+  savePresetsToDisk()
+}
+
+// ── Preview layer styling (uses container-query units so text scales with the box) ──
+const previewLayerStyle = (layer: LanguageLayer): Record<string, string> => {
+  const widthPct = layer.maxWidth > 0 ? Math.min((layer.maxWidth / previewScreenWidth.value) * 100, 100) : null
+  return {
+    position: 'absolute',
+    left: `${layer.positionX}%`,
+    top: `${layer.positionY}%`,
+    transform: 'translate(-50%, -50%)',
+    width: widthPct != null ? `${widthPct}%` : 'auto',
+    maxWidth: '100%',
+    textAlign: 'center',
+    overflow: 'hidden',
+  }
+}
+const previewTextStyle = (layer: LanguageLayer): Record<string, string> => ({
+  // Scale font relative to the real screen width via container-query width units
+  fontSize: `${(layer.fontSize / previewScreenWidth.value) * 100}cqw`,
+  fontFamily: layer.fontFamily,
+  color: layer.textColor,
+  lineHeight: '1.15',
+  textShadow: selectedPreset.value?.style.textShadow ? '1px 1px 2px rgba(0,0,0,0.8)' : 'none',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+})
+const selectLayerFromPreview = (layer: LanguageLayer) => {
+  expandedLayers.value.add(layer.id)
+}
+
+// ── OBS Output URL ───────────────────────────────────────────────────────────
+const copyObsUrl = async (preset: WindowPreset) => {
+  try {
+    const url = await window.ipcRenderer.invoke('get-obs-url', { presetId: preset.id })
+    await navigator.clipboard.writeText(url)
+    obsCopiedId.value = preset.id
+    setTimeout(() => {
+      if (obsCopiedId.value === preset.id) obsCopiedId.value = null
+    }, 2000)
+  } catch (e) {
+    console.error('Failed to copy OBS URL:', e)
+  }
 }
 
 const toggleTranscription = async () => {
@@ -977,12 +1443,18 @@ const startDeepgramAudioCapture = async () => {
 // Debounced to prevent IPC flood on every keystroke (fixes Windows input focus loss)
 let watchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 watch(() => selectedPreset.value, (newVal) => {
-  if (newVal && activeWindows.value.has(newVal.id)) {
-    if (watchDebounceTimer) clearTimeout(watchDebounceTimer)
-    watchDebounceTimer = setTimeout(() => {
-      updateLiveWindow(newVal)
-    }, 300)
-  }
+  if (!newVal) return
+  if (watchDebounceTimer) clearTimeout(watchDebounceTimer)
+  watchDebounceTimer = setTimeout(() => {
+    if (activeWindows.value.has(newVal.id)) updateLiveWindow(newVal)
+    // Always push to OBS — broadcast is a no-op if no client is subscribed
+    updateObsConfig(newVal)
+  }, 300)
 }, { deep: true })
+
+// Re-resolve background image preview when the selected preset or its image changes
+watch(() => selectedPreset.value?.style.backgroundImage, () => {
+  resolveSelectedBg()
+})
 
 </script>
