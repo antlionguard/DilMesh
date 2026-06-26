@@ -149,69 +149,62 @@ async function broadcastToProjectionWindows(channel: string, data: any) {
       continue
     }
 
-    // For each language layer in this window, handle translation separately
-    for (const layer of layers) {
+    // Resolve the translation provider once per sentence (shared by all layers)
+    let translationProvider = 'GCP'
+    try {
+      const transSettings: any = store.get('transcription')
+      if (transSettings?.translationProvider) translationProvider = transSettings.translationProvider
+    } catch { /* default to GCP */ }
+
+    // Translate ALL language layers CONCURRENTLY so a 12-language grid appears together
+    // instead of filling in one-by-one. (Sequential awaits made the grid stagger
+    // top-to-bottom whenever per-call latency was non-trivial — slow network / NLLB.)
+    await Promise.all(layers.map(async (layer) => {
       const isTranslationLayer = layer.language !== 'live'
 
-      // Translation layers: ONLY accept sentence-level events
-      if (isTranslationLayer && !data.isSentence) continue
-
-      if (isTranslationLayer && data.text && data.isSentence) {
-        // Skip if source matches target
-        const sourceLang = (data.detectedLanguage || '').split('-')[0]
-        const targetLang = layer.language.split('-')[0]
-
-        if (sourceLang && sourceLang === targetLang) {
-          sendTranscript(win, windowId, { ...data, layerId: layer.id })
-          continue
-        }
-
-        // Determine translation provider
-        let translationProvider = 'GCP'
-        try {
-          const transSettings: any = store.get('transcription')
-          if (transSettings?.translationProvider) {
-            translationProvider = transSettings.translationProvider
-          }
-        } catch { /* default to GCP */ }
-
-        console.log(`[Main] Window ${windowId} layer ${layer.id} (${layer.language}) translation needed. Provider: ${translationProvider}`)
-
-        try {
-          let translatedText: string | null = null
-
-          if (translationProvider === 'GCP' && gcpTranslationService && gcpTranslationService.isReady()) {
-            translatedText = await gcpTranslationService.translate(data.text, layer.language, data.detectedLanguage)
-          } else if (translationProvider === 'RIVA' && rivaSpeechService) {
-            translatedText = await rivaSpeechService.translate(data.text, layer.language, data.detectedLanguage)
-          } else if (translationProvider === 'NLLB' && nllbTranslationService) {
-            // translate() self-heals (lazy re-load) and falls back to the original text on failure
-            translatedText = await nllbTranslationService.translate(data.text, layer.language, data.detectedLanguage)
-          } else if (translationProvider === 'DEEPL' && deeplTranslationService && deeplTranslationService.isReady()) {
-            translatedText = await deeplTranslationService.translate(data.text, layer.language, data.detectedLanguage)
-          } else {
-            console.warn(`[Main] Translation service ${translationProvider} not ready for layer ${layer.id}`)
-          }
-
-          if (translatedText !== null && translatedText.trim().length > 0) {
-            console.log(`[${translationProvider}] Layer ${layer.id} translation: "${translatedText}"`)
-            sendTranscript(win, windowId, { ...data, text: translatedText, layerId: layer.id })
-          } else {
-            // Translation failed or came back empty — fall back to the original text
-            sendTranscript(win, windowId, { ...data, layerId: layer.id })
-          }
-        } catch (error) {
-          console.error(`[${translationProvider}] Translation failed for layer ${layer.id}:`, error)
-          sendTranscript(win, windowId, { ...data, layerId: layer.id })
-        }
-      } else if (!isTranslationLayer) {
-        // Live layer: handled by broadcastLiveCaption, skip here for sentences
-        // (sentences also sent to live layers for display)
-        if (data.isSentence) {
-          sendTranscript(win, windowId, { ...data, layerId: layer.id })
-        }
+      // Live layers: only forward sentence-level text (interim handled by broadcastLiveCaption)
+      if (!isTranslationLayer) {
+        if (data.isSentence) sendTranscript(win, windowId, { ...data, layerId: layer.id })
+        return
       }
-    }
+
+      // Translation layers: ONLY accept sentence-level events
+      if (!data.isSentence || !data.text) return
+
+      // Skip translation if source matches target
+      const sourceLang = (data.detectedLanguage || '').split('-')[0]
+      const targetLang = layer.language.split('-')[0]
+      if (sourceLang && sourceLang === targetLang) {
+        sendTranscript(win, windowId, { ...data, layerId: layer.id })
+        return
+      }
+
+      try {
+        let translatedText: string | null = null
+        if (translationProvider === 'GCP' && gcpTranslationService && gcpTranslationService.isReady()) {
+          translatedText = await gcpTranslationService.translate(data.text, layer.language, data.detectedLanguage)
+        } else if (translationProvider === 'RIVA' && rivaSpeechService) {
+          translatedText = await rivaSpeechService.translate(data.text, layer.language, data.detectedLanguage)
+        } else if (translationProvider === 'NLLB' && nllbTranslationService) {
+          // translate() self-heals (lazy re-load) and falls back to the original text on failure
+          translatedText = await nllbTranslationService.translate(data.text, layer.language, data.detectedLanguage)
+        } else if (translationProvider === 'DEEPL' && deeplTranslationService && deeplTranslationService.isReady()) {
+          translatedText = await deeplTranslationService.translate(data.text, layer.language, data.detectedLanguage)
+        } else {
+          console.warn(`[Main] Translation service ${translationProvider} not ready for layer ${layer.id}`)
+        }
+
+        if (translatedText !== null && translatedText.trim().length > 0) {
+          sendTranscript(win, windowId, { ...data, text: translatedText, layerId: layer.id })
+        } else {
+          // Translation failed or came back empty — fall back to the original text
+          sendTranscript(win, windowId, { ...data, layerId: layer.id })
+        }
+      } catch (error) {
+        console.error(`[${translationProvider}] Translation failed for layer ${layer.id}:`, error)
+        sendTranscript(win, windowId, { ...data, layerId: layer.id })
+      }
+    }))
   }
 }
 
