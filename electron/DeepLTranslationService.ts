@@ -15,6 +15,24 @@ export class DeepLTranslationService {
   private cache: TranslationCache = {}
   private readonly CACHE_TTL = 30000 // 30 seconds
 
+  // Concurrency limiter — many layers translate in parallel, but DeepL (especially the
+  // free tier) rate-limits bursts. Cap in-flight requests and queue the rest.
+  private readonly maxConcurrent = 4
+  private active = 0
+  private waiters: Array<() => void> = []
+
+  private async acquire(): Promise<void> {
+    if (this.active < this.maxConcurrent) { this.active++; return }
+    await new Promise<void>(resolve => this.waiters.push(resolve))
+    // slot handed over directly by release() — already counted in `active`
+  }
+
+  private release(): void {
+    const next = this.waiters.shift()
+    if (next) next()        // transfer the slot to the next waiter (active unchanged)
+    else this.active--      // no one waiting — free the slot
+  }
+
   initialize(apiKey: string, apiUrlOverride?: string): boolean {
     if (!apiKey || !apiKey.trim()) {
       this.apiKey = null
@@ -54,36 +72,58 @@ export class DeepLTranslationService {
     const target = DeepLTranslationService.toTargetLang(targetLanguage)
     if (!target) return text // unsupported target — keep original
 
+    const body = new URLSearchParams()
+    body.append('text', text)
+    body.append('target_lang', target)
+    const source = DeepLTranslationService.toSourceLang(sourceLanguage)
+    if (source) body.append('source_lang', source)
+    const payload = body.toString()
+
+    await this.acquire()
     try {
-      const body = new URLSearchParams()
-      body.append('text', text)
-      body.append('target_lang', target)
-      const source = DeepLTranslationService.toSourceLang(sourceLanguage)
-      if (source) body.append('source_lang', source)
+      const maxAttempts = 3
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const res = await fetch(`${this.apiUrl}/v2/translate`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `DeepL-Auth-Key ${this.apiKey}`,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: payload,
+          })
 
-      const res = await fetch(`${this.apiUrl}/v2/translate`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `DeepL-Auth-Key ${this.apiKey}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: body.toString(),
-      })
+          if (res.ok) {
+            const data: any = await res.json()
+            const translation: string = data?.translations?.[0]?.text ?? text
+            this.cache[cacheKey] = { translation, timestamp: Date.now() }
+            this.cleanCache()
+            return translation
+          }
 
-      if (!res.ok) {
-        console.error(`DeepL translate failed: HTTP ${res.status} ${await res.text().catch(() => '')}`)
-        return text
+          // 429 (too many requests) / 529 (under load) → transient: retry with backoff
+          if ((res.status === 429 || res.status === 529) && attempt < maxAttempts) {
+            const waitMs = 400 * attempt
+            console.warn(`DeepL ${res.status} — retrying in ${waitMs}ms (attempt ${attempt}/${maxAttempts})`)
+            await new Promise(r => setTimeout(r, waitMs))
+            continue
+          }
+
+          // Non-retryable (456 quota exceeded, 403 auth, …) or out of retries → keep original
+          console.error(`DeepL translate failed: HTTP ${res.status} ${await res.text().catch(() => '')}`)
+          return text
+        } catch (error) {
+          if (attempt < maxAttempts) {
+            await new Promise(r => setTimeout(r, 400 * attempt))
+            continue
+          }
+          console.error('DeepL translation error:', error)
+          return text
+        }
       }
-
-      const data: any = await res.json()
-      const translation: string = data?.translations?.[0]?.text ?? text
-
-      this.cache[cacheKey] = { translation, timestamp: Date.now() }
-      this.cleanCache()
-      return translation
-    } catch (error) {
-      console.error('DeepL translation error:', error)
       return text
+    } finally {
+      this.release()
     }
   }
 
