@@ -9,7 +9,7 @@
 
 DilMesh is a powerful desktop application for **real-time speech-to-text and instant multi-language translation**, broadcasting subtitles to multiple windows, fullscreen displays, and **OBS Studio** simultaneously. From a single microphone it can drive **12–16 languages at once**, each placed anywhere on screen — built for conferences, live events, houses of worship, streamers, and accessible multilingual communication.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Version](https://img.shields.io/badge/version-2.4.2-brightgreen)](https://github.com/antlionguard/DilMesh/releases)
 [![Electron](https://img.shields.io/badge/Electron-30.0.1-blue?logo=electron)](https://www.electronjs.org/)
 [![Vue 3](https://img.shields.io/badge/Vue.js-3.4.21-4FC08D?logo=vue.js)](https://vuejs.org/)
@@ -238,11 +238,28 @@ Contributions are welcome — new languages, STT/translation providers, UI impro
 4. Push (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
+> **Note on contributions:** Because DilMesh is dual-licensed (AGPL + commercial),
+> by submitting a contribution you agree that the copyright holder may include
+> your contribution in both the AGPL release **and** commercially-licensed
+> versions of DilMesh. If you cannot agree to this, please open an issue first
+> to discuss.
+
 ---
 
 ## 📄 License
 
-Distributed under the MIT License. See `LICENSE` for details.
+DilMesh is **dual-licensed**.
+
+- **Open source (default):** [GNU AGPL-3.0-or-later](./LICENSE). Free to use, study,
+  modify, and redistribute — provided that any distributed or network-hosted
+  modified version also makes its complete source code available under the AGPL.
+- **Commercial:** If you want to use DilMesh in a closed-source / proprietary
+  product or as a hosted service **without** the AGPL's source-disclosure
+  obligations, a separate commercial license is available. See
+  [`COMMERCIAL-LICENSE.md`](./COMMERCIAL-LICENSE.md) or contact
+  **oguzhnn.yavuz@protonmail.com**.
+
+Copyright (C) 2026 Oğuzhan Yavuz.
 
 ---
 

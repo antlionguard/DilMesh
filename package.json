@@ -3,6 +3,9 @@
   "private": true,
   "version": "2.4.2",
   "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "author": "Oğuzhan Yavuz",
+  "homepage": "https://github.com/antlionguard/DilMesh",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build && electron-builder",
